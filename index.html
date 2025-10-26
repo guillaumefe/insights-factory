@@ -317,6 +317,27 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
   .panel, .list, .fields, .inline, header { min-width:0 }
   .preview pre{ max-width:100%; overflow:auto }
 }
+/* 1) Empêcher le chevauchement : le titre peut rétrécir et couper en ellipsis */
+.proc-item .title,
+.section-item .title{
+  flex: 1 1 auto;       /* laisse la place à la pill */
+  min-width: 0;         /* indispensable en flexbox pour autoriser le shrink */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 2) La pill reste compacte et ne wrap pas; pas de retour à la ligne du container */
+.proc-item,
+.section-item{
+  flex-wrap: nowrap;    /* pas de saut de ligne dans la carte */
+}
+.proc-item .pill,
+.section-item .pill{
+  flex: 0 0 auto;       /* taille intrinsèque, pas de flex-shrink */
+  margin-left: 8px;     /* un peu d’air entre titre et pill */
+}
+
 </style>
 </head>
 <body>
