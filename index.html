@@ -1155,9 +1155,24 @@ function renderFields(items){
         e.dataTransfer.effectAllowed='move';
         e.dataTransfer.setData(DND_MIME, JSON.stringify({kind:'field',from:'root',proc:currentProcess,sec:currentSection,fi:+item.dataset.index}));
       });
-      item.addEventListener('dragend',()=> e.stopPropagation(); item.classList.remove('dragging'));
-      item.addEventListener('dragover',(e)=>{ e.stopPropagation(); if (hasType(e.dataTransfer,DND_MIME)){ e.preventDefault(); e.stopPropagation(); item.classList.add('drop-before'); }});
-      item.addEventListener('dragleave',()=> e.stopPropagation(); item.classList.remove('drop-before'));
+        item.addEventListener('dragend', (e) => {
+          e.stopPropagation();
+          item.classList.remove('dragging');
+        });
+        
+        item.addEventListener('dragover', (e) => {
+          e.stopPropagation();
+          if (hasType(e.dataTransfer, DND_MIME)) {
+            e.preventDefault();
+            item.classList.add('drop-before');
+          }
+        });
+        
+        item.addEventListener('dragleave', (e) => {
+          e.stopPropagation();
+          item.classList.remove('drop-before');
+        });
+
       item.addEventListener('drop',(e)=>{
         if (!beginDrop(e)) return;
         e.stopPropagation(); 
