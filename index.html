@@ -253,12 +253,15 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
   border-radius:14px; box-shadow:var(--shadow); padding:16px;
 }
 .modal h3{ margin:0 0 8px; font-size:16px }
-.modal p{ margin:4px 0 10px; color:var(--muted) }
+.modal p{
+  margin:4px 0 10px;
+  color:var(--muted);
+  white-space:pre-line; /* ← permet d’afficher \n \n */
+}
 .modal .row{ display:flex; gap:8px; align-items:center }
 .modal .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:12px }
 .modal input[type="password"], .modal input[type="text"]{ width:100% }
 .modal-backdrop.show{ display:flex }
-
 </style>
 </head>
 <body>
@@ -1686,7 +1689,6 @@ async function warnWeakZipCrypto(){
     "• Considérez que ce ZIP est **faiblement protégé, presque comme s’il ne l’était pas**.\n" +
     "• Ne stockez pas ce ZIP sur des canaux non sûrs (cloud public, USB partagé, e-mail non sécurisé…)\n" +
     "• Ne le partagez qu’avec des personnes de confiance\n" +
-    "• Si vous voulez une vraie sécurité, utilisez l’**export JSON chiffré (AES-GCM)** disponible dans l’interface.\n\n" +
     "En continuant, vous reconnaissez cette faiblesse imposée par Microsoft Windows et acceptez les risques.",
     "J’ai compris, continuer"
   );
