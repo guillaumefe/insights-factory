@@ -1658,12 +1658,49 @@ async function makeZipAES(files, password){
   return await writer.close();
 }
 
+// (REMPLACE) ZIP chiffré **ZipCrypto** (compatible Explorateur Windows)
+async function makeZipForWindows(files, password){
+  if (!window.zip) throw new Error('zip.js introuvable');
+  const writer = new zip.ZipWriter(new zip.BlobWriter('application/zip'), {
+    password,          // ← active le chiffrement
+    zipCrypto: true,   // ← **INDISPENSABLE** pour Windows Explorer
+    level: 9           // (optionnel) meilleure compression
+  });
+  for (const f of files){
+    await writer.add(
+      f.name,
+      new zip.Uint8ArrayReader(f.data),
+      { lastModDate: f.date || new Date() }
+    );
+  }
+  return await writer.close();
+}
+
+// ⚠️ Avertissement sécurité faible (ZipCrypto pour Windows)
+async function warnWeakZipCrypto(){
+  return await confirmWarning(
+    '⚠️ Limitation de sécurité imposée par Microsoft Windows',
+    "Ce ZIP sera chiffré en **ZipCrypto**, un mécanisme **ancien, vulnérable et facilement cassable**.\n\n" +
+    "➡️ **Important : ce choix n’est pas dû à l’application**, mais à une **limitation de l’Explorateur Windows**, qui refuse d’ouvrir les ZIP protégés avec un chiffrement moderne (AES) et n’accepte que ce vieux standard.\n\n" +
+    "Conséquences :\n" +
+    "• Considérez que ce ZIP est **faiblement protégé, presque comme s’il ne l’était pas**.\n" +
+    "• Ne stockez pas ce ZIP sur des canaux non sûrs (cloud public, USB partagé, e-mail non sécurisé…)\n" +
+    "• Ne le partagez qu’avec des personnes de confiance\n" +
+    "• Si vous voulez une vraie sécurité, utilisez l’**export JSON chiffré (AES-GCM)** disponible dans l’interface.\n\n" +
+    "En continuant, vous reconnaissez cette faiblesse imposée par Microsoft Windows et acceptez les risques.",
+    "J’ai compris, continuer"
+  );
+}
+
 /* Build ZIP de tous les processus activés */
 /* (REMPLACE) Build ZIP UML protégé AES */
 async function exportAllUmlZIP(){
   const procs = PROCESSES.filter(p=>p.enabled!==false);
   if (!procs.length){ alert('Aucun processus activé'); return; }
-
+  
+  const okWeak = await warnWeakZipCrypto();
+  if (!okWeak) return;
+  
   const pwd = await promptPassword('Schéma UML (ZIP protégé)', 'Choisissez un mot de passe pour le ZIP.');
   if (!pwd) return;
 
@@ -1682,7 +1719,7 @@ async function exportAllUmlZIP(){
 
   let zipBlob;
   try{
-    zipBlob = await makeZipAES(files, pwd);    // << chiffrage AES
+    zipBlob = await makeZipForWindows(files, pwd);    // << chiffrage ZipCrypto (faible, imposé par Microsoft Windows)
   }catch(e){
     // Fallback (non chiffré) si zip.js indispo
     console.warn('zip.js indisponible, fallback non chiffré', e);
