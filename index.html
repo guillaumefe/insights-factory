@@ -1,4 +1,4 @@
-<!doctype html>
+ <!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8" />
@@ -310,14 +310,13 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
   /* Panneau de droite occupe toute la hauteur et scrolle en interne */
   .main-panel{
     height:100%; min-height:0; overflow:auto;
-    display:block; /* garde ton flux interne tel quel */
+    display:block;
   }
 
   /* Sécurité anti-débordement horizontal */
   .panel, .list, .fields, .inline, header { min-width:0 }
-  .preview pre{ max-width:100%; overflow:auto } /* tu l’avais, on garde */
+  .preview pre{ max-width:100%; overflow:auto }
 }
-
 </style>
 </head>
 <body>
@@ -357,7 +356,8 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
       </div>
     </div>
 
-    <div class="panel">
+    <!-- >>> Panneau de droite scrollable -->
+    <div class="panel main-panel">
       <div id="processEditor" class="hidden" aria-live="polite">
         <h2>Édition du processus</h2>
         <div class="row" style="margin-bottom:8px">
@@ -429,9 +429,7 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
           <div class="tip-toolbar">
             <div class="icon-picker">
               <button class="btn" id="btnToggleIconPicker" type="button">🎯 Choisir une icône</button>
-              <div id="iconGrid" class="icon-grid hidden" role="dialog" aria-label="Choisir une icône">
-                <!-- peu d’icônes “prêtes” pour la rapidité -->
-              </div>
+              <div id="iconGrid" class="icon-grid hidden" role="dialog" aria-label="Choisir une icône"></div>
             </div>
 
             <div style="min-width:240px; flex:1">
@@ -526,8 +524,11 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
   </div>
 </div>
 
+<!-- =========================
+     PARTIE 1/3 — ÉTAT & HELPERS
+     ========================= -->
 <script>
-/* --- État global & helpers --- */
+/* --- État global --- */
 let PROCESSES = [];
 let currentProcess = 0;
 let currentSection = -1;
@@ -541,51 +542,63 @@ const $$ = (sel, root=document)=> [...root.querySelectorAll(sel)];
 const save = ()=> localStorage.setItem('templateBuilderV2', JSON.stringify(PROCESSES));
 const load = ()=> { try{ const raw = localStorage.getItem('templateBuilderV2'); return raw ? JSON.parse(raw) : []; }catch(_){ return []; } };
 const isOptType = t => (t==='radio' || t==='select');
-const toast = (msg)=>{ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=> t.classList.remove('show'), 1200); };
 const isField = o => o && o.__kind === 'field';
 const isGroup = o => o && o.__kind === 'group';
 const P = ()=> PROCESSES[currentProcess] || null;
 const S = ()=> (P()?.sections) || [];
+const hasType = (dt, t)=> Array.from(dt?.types || []).indexOf(t) !== -1;
 
-/* --- UID groupes --- */
+function toast(msg){ const t=$('#toast'); if(!t) return; t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1200); }
+
+/* UID groupes */
 let __gid_inc = 1;
 function genUid(){ try{ return crypto.randomUUID(); }catch(_){ return 'g'+(__gid_inc++); } }
 
-// Base64 util (binaire-sûr)
+/* Base64 util (binaire-sûr) */
 function b64encode(u8){ let s='',c=0x8000; for(let i=0;i<u8.length;i+=c){ s+=String.fromCharCode.apply(null,u8.subarray(i,i+c)); } return btoa(s); }
 function b64decode(b){ const bin=atob(b); const u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; }
 
-// Prompts de modale
+/* Modale accessible (Esc, trap focus) */
 function openModal({title, text, password=false, placeholder='Mot de passe', okText='OK'}){
   return new Promise(resolve=>{
-    const host = document.getElementById('modalHost');
-    const t = document.getElementById('modalTitle');
-    const p = document.getElementById('modalText');
-    const row = document.getElementById('modalInputRow');
-    const inp = document.getElementById('modalInput');
-    const ok = document.getElementById('modalOk');
-    const cancel = document.getElementById('modalCancel');
-    t.textContent = title||'';
-    p.textContent = text||'';
+    const host = $('#modalHost');
+    const t = $('#modalTitle'); const p = $('#modalText');
+    const row = $('#modalInputRow'); const inp = $('#modalInput');
+    const ok = $('#modalOk'); const cancel = $('#modalCancel');
+    const prevFocus = document.activeElement;
+
+    t.textContent = title||''; p.textContent = text||'';
     row.classList.toggle('hidden', !password);
-    inp.type = password ? 'password' : 'text';
-    inp.value = '';
-    inp.placeholder = placeholder;
+    inp.type = password ? 'password' : 'text'; inp.value = ''; inp.placeholder = placeholder;
     ok.textContent = okText;
-    const close=(val)=>{ host.classList.remove('show'); resolve(val); };
-    ok.onclick = ()=> close(password ? inp.value : true);
-    cancel.onclick = ()=> close(null);
+
+    function close(val){
+      host.classList.remove('show');
+      document.removeEventListener('keydown', onKey);
+      if (prevFocus && prevFocus.focus) prevFocus.focus();
+      resolve(val);
+    }
+    function onKey(e){
+      if (e.key === 'Escape'){ e.preventDefault(); close(null); }
+      if (e.key === 'Tab'){
+        const foci = host.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])');
+        if (!foci.length) return;
+        const first = foci[0], last = foci[foci.length-1];
+        if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+      }
+    }
+    ok.onclick=()=> close(password ? inp.value : true);
+    cancel.onclick=()=> close(null);
+    document.addEventListener('keydown', onKey);
     host.classList.add('show');
-    setTimeout(()=> password ? inp.focus() : ok.focus(), 0);
+    setTimeout(()=> (password ? inp : ok).focus(), 0);
   });
 }
-const promptPassword = (title='Mot de passe requis', text='Saisissez le mot de passe.') =>
-  openModal({title, text, password:true, okText:'Valider'});
+const promptPassword = (title='Mot de passe requis', text='Saisissez le mot de passe.') => openModal({title,text,password:true,okText:'Valider'});
+const confirmWarning = (title, text, okText='Oui, continuer') => openModal({title,text,password:false,okText});
 
-const confirmWarning = (title, text, okText='Oui, continuer') =>
-  openModal({title, text, password:false, okText});
-
-/* --- WebCrypto: PBKDF2 + AES-GCM --- */
+/* WebCrypto: PBKDF2 + AES-GCM */
 async function deriveAesKey(password, saltU8, iterations=200000){
   const enc = new TextEncoder();
   const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
@@ -593,8 +606,7 @@ async function deriveAesKey(password, saltU8, iterations=200000){
     {name:'PBKDF2', salt: saltU8, iterations, hash:'SHA-256'},
     baseKey,
     {name:'AES-GCM', length:256},
-    false,
-    ['encrypt','decrypt']
+    false, ['encrypt','decrypt']
   );
 }
 async function aesGcmEncryptFromString(password, plain){
@@ -604,32 +616,28 @@ async function aesGcmEncryptFromString(password, plain){
   const iv   = crypto.getRandomValues(new Uint8Array(12));
   const key  = await deriveAesKey(password, salt);
   const ct   = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, data));
-  return {
-    format: 'IF-AESGCM-v1',
-    kdf: 'PBKDF2', hash:'SHA-256', iter: 200000,
-    salt: b64encode(salt),
-    iv:   b64encode(iv),
-    ct:   b64encode(ct)
-  };
+  return { format:'IF-AESGCM-v1', kdf:'PBKDF2', hash:'SHA-256', iter:200000, salt:b64encode(salt), iv:b64encode(iv), ct:b64encode(ct) };
 }
 async function aesGcmDecryptToString(password, pack){
   if (!pack || pack.format!=='IF-AESGCM-v1') throw new Error('Format inconnu');
-  const salt = b64decode(pack.salt);
-  const iv   = b64decode(pack.iv);
-  const ct   = b64decode(pack.ct);
-  const key  = await deriveAesKey(password, salt, pack.iter||200000);
-  const pt   = new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, ct));
+  const salt=b64decode(pack.salt), iv=b64decode(pack.iv), ct=b64decode(pack.ct);
+  const key=await deriveAesKey(password, salt, pack.iter||200000);
+  const pt=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, ct));
   return new TextDecoder().decode(pt);
 }
 
-/* --- Noms courts --- */
-function tinyName(str, max = 6){
+/* tinyName + uniqueName (fallback sans \p{Diacritic} si non supporté) */
+function stripDiacritics(s){
+  try{ return s.normalize('NFD').replace(/\p{Diacritic}/gu,''); }
+  catch(_){ return s.normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+}
+function tinyName(str, max=6){
   if (!str) return 'i';
-  let s = String(str).normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').trim();
+  let s = stripDiacritics(String(str)).toLowerCase().replace(/[^a-z0-9\s]/g,' ').trim();
   if (!s) return 'i';
   const words = s.split(/\s+/).filter(Boolean);
   let out = words.map(w=>w[0]).join('');
-  if (out.length<2){ const w = words[0]||s; const cons = w.replace(/[aeiou]/g,''); out = (w[0]||'') + (cons.slice(1) || w.slice(1)); }
+  if (out.length<2){ const w=words[0]||s; const cons=w.replace(/[aeiou]/g,''); out=(w[0]||'')+(cons.slice(1)||w.slice(1)); }
   if (out.length<2) out = s.replace(/\s+/g,'');
   out = out.slice(0,max);
   return out || 'i';
@@ -649,42 +657,13 @@ function uniqueName(base){
   return `${name}-${n}`;
 }
 
-/* --- Fabriques --- */
-function makeField(){
-  return {
-    __kind:'field',
-    name:'', type:'text', label:'',
-    required:false, repeatable:false, options:[],
-    nameAuto:true,
-    tips: { icon:'', text:'' }
-  };
-}
+/* Fabriques */
+function makeField(){ return { __kind:'field', name:'', type:'text', label:'', required:false, repeatable:false, options:[], nameAuto:true, tips:{icon:'',text:''} }; }
 function makeGroup(){ return { __kind:'group', __uid:genUid(), name:'', label:'', required:false, repeatable:false, fields:[], nameAuto:true }; }
 function makeSection(){ return { title:'Nouvelle partie', fields:[] }; }
 function makeProcess(){ return { name:`Processus ${PROCESSES.length+1}`, enabled:true, sections:[] }; }
 
-function insertFieldInGroupByUid(gid, field, beforeIdx=null){
-  const { group } = findGroupByUid(gid);
-  if (!group) return;
-  const arr = group.fields || (group.fields = []);
-  const at = (beforeIdx==null || beforeIdx<0 || beforeIdx>arr.length) ? arr.length : beforeIdx;
-  arr.splice(at, 0, field);
-}
-
-/* --- Group helper --- */
-function findGroupByUid(uid){
-  const arr = S()[currentSection]?.fields || [];
-  const idx = arr.findIndex(g => isGroup(g) && g.__uid === uid);
-  return { index: idx, group: arr[idx] };
-}
-
-/* --- DnD protection --- */
-let _dropBusy = false;
-function beginDrop(e){ if (_dropBusy) return false; _dropBusy = true; e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.(); return true; }
-function endDrop(){ requestAnimationFrame(()=>{ save(); renderAll(); selectSection(currentSection); _dropBusy=false; }); }
-let _justDroppedAt = 0; function markDrop(){ _justDroppedAt = performance.now(); } function isRecentDrop(){ return performance.now() - _justDroppedAt < 150; }
-
-/* --- Linkify + multilignes --- */
+/* Linkify + multilignes (sécurisé) */
 function linkifyRaw(text){
   if (!text) return '';
   let t = String(text)
@@ -692,174 +671,167 @@ function linkifyRaw(text){
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   t = t.replace(/(\bhttps?:\/\/[^\s<]+)/gi, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
   t = t.replace(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, '<a href="mailto:$1">$1</a>');
-  t = t.replace(/\r?\n/g, '<br>'); // << préserve les retours à la ligne
+  t = t.replace(/\r?\n/g, '<br>');
   return t;
 }
+
+/* Construction DOM sans innerHTML non maîtrisé */
+function el(tag, className, text){
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+/* Wrap texte pour UML (sans mesure via canvas) — approx. par longueur */
+function wrapByChars(s, maxChars){
+  const words = String(s||'').split(/\s+/).filter(Boolean);
+  const out=[]; let cur='';
+  words.forEach(w=>{
+    const t = cur ? cur+' '+w : w;
+    if (t.length <= maxChars) cur = t; else { if (cur) out.push(cur); cur = w; }
+  });
+  if (cur) out.push(cur);
+  return out.length ? out : [''];
+}
+</script>
+
+<!-- =========================
+     PARTIE 2/3 — RENDU & UI
+     ========================= -->
+<script>
+/* --- Helpers de rendu d’astuce --- */
 function updateTipsPreview(f){
   const prev = $('#fldTipsPreview'); if (!prev) return;
   const icon = (f.tips?.icon)||'';
   const text = (f.tips?.text)||'';
-  const html = `
+  prev.innerHTML = `
     <div class="tip-icon">${icon || '💡'}</div>
     <div class="tip-text">${linkifyRaw(text) || '<span class="muted">Aucune astuce</span>'}</div>
   `;
-  prev.innerHTML = html;
 }
 
-/* --- Ouvre l'éditeur champ --- */
-function openFieldEditor(f){
-  const area = $('#editorArea'); area?.classList.remove('hidden');
-  $('#groupEditor')?.classList.add('hidden');
-  $('#fldName').value = f.label || '';
-  $('#fldLabel').value = f.label || '';
-  $('#fldType').value = f.type || 'text';
-  $('#fldRequired').value = f.required ? 'true' : 'false';
-  $('#fldRepeatable').value = f.repeatable ? 'true' : 'false';
-  $('#fldOptions').value = (Array.isArray(f.options)? f.options : []).join(', ');
-  // Tips
-  $('#fldTipsIcon').value = (f.tips?.icon)||'';
-  $('#fldTips').value = (f.tips?.text)||'';
-  updateTipsPreview(f);
-
-  updateOptionsVisibility();
-  $('#fldName').focus();
-}
-
-/* --- Rendu processus --- */
+/* --- Rendu Processus / Sections (DOM sûr) --- */
 function renderProcesses(){
-  const list = $('#processList');
-  list.innerHTML = '';
+  const list = $('#processList'); list.innerHTML = '';
+  PROCESSES.forEach((proc, i)=>{
+    const item = el('div', 'proc-item' + (proc.enabled ? '' : ' disabled'));
+    item.draggable = true; item.dataset.index = i;
 
-  PROCESSES.forEach((proc, i) => {
-    const item = document.createElement('div');
-    item.className = 'proc-item' + (proc.enabled ? '' : ' disabled');
-    item.draggable = true;
-    item.dataset.index = i;
+    const drag = el('div', 'drag', '⋮⋮'); drag.title = 'Glisser pour réorganiser';
+    const title = el('div', 'title', proc.name || '(sans nom)');
+    const pill = el('span', 'pill', `${(proc.sections||[]).length} partie(s)`);
+    const right = el('div','right');
 
-    const actLabel = proc.enabled ? 'Désactiver' : 'Activer';
+    const bToggle = el('button','btn', proc.enabled ? 'Désactiver' : 'Activer'); bToggle.dataset.act='toggle';
+    const bEdit   = el('button','btn','Éditer'); bEdit.dataset.act='edit';
+    const bDel    = el('button','btn danger','Supprimer'); bDel.dataset.act='del';
+    right.append(bToggle,bEdit,bDel);
 
-    item.innerHTML = `
-      <div class="drag" title="Glisser pour réorganiser">⋮⋮</div>
-      <div class="title">${proc.name || '(sans nom)'}</div>
-      <span class="pill">${(proc.sections || []).length} partie(s)</span>
-      <div class="right">
-        <button class="btn" data-act="toggle">${actLabel}</button>
-        <button class="btn" data-act="edit">Éditer</button>
-        <button class="btn danger" data-act="del">Supprimer</button>
-      </div>
-    `;
+    item.append(drag,title,pill,right);
+    if (i===currentProcess) item.style.outline='2px solid var(--accent-2)';
 
-    item.addEventListener('click', (e) => {
+    item.addEventListener('click',(e)=>{
       const act = e.target.closest('button')?.dataset?.act || 'edit';
-      if (act === 'edit') {
-        selectProcess(i);
-        $('#processEditor')?.scrollIntoView({ behavior: 'smooth' });
-      } else if (act === 'toggle') {
-        PROCESSES[i].enabled = !PROCESSES[i].enabled;
-        save(); renderAll(); renderPreview();
-      } else if (act === 'del') {
-        if (PROCESSES.length <= 1) {
-          toast('Au moins un processus est requis');
-          return;
-        }
-        if (confirm('Supprimer ce processus ?')) {
-          PROCESSES.splice(i, 1);
-          if (currentProcess >= PROCESSES.length) currentProcess = PROCESSES.length - 1;
-          currentSection = -1;
-          save(); renderAll(); selectProcess(currentProcess);
+      if (act==='edit'){ selectProcess(i); $('#processEditor')?.scrollIntoView({behavior:'smooth'}); }
+      else if (act==='toggle'){ PROCESSES[i].enabled = !PROCESSES[i].enabled; save(); renderAll(); }
+      else if (act==='del'){
+        if (PROCESSES.length<=1){ toast('Au moins un processus est requis'); return; }
+        if (confirm('Supprimer ce processus ?')){
+          PROCESSES.splice(i,1);
+          if (currentProcess>=PROCESSES.length) currentProcess=PROCESSES.length-1;
+          currentSection=-1; save(); renderAll(); selectProcess(currentProcess);
         }
       }
     });
 
-    item.addEventListener('dragstart', (e) => {
+    item.addEventListener('dragstart',(e)=>{
       item.classList.add('dragging');
       e.dataTransfer.setData('text/plain', i);
-      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.effectAllowed='move';
+    });
+    item.addEventListener('dragend',()=> item.classList.remove('dragging'));
+
+    item.addEventListener('dragover',(e)=>{
+      const dt=e.dataTransfer;
+      if (Array.from(dt.types||[]).length){ e.preventDefault(); item.classList.add('drop-target'); }
+    });
+    item.addEventListener('dragleave',()=> item.classList.remove('drop-target'));
+    item.addEventListener('drop', async (e)=>{
+      e.preventDefault(); item.classList.remove('drop-target');
+      const dt=e.dataTransfer;
+      const hasJson = hasType(dt, DND_MIME);
+      const hasText = hasType(dt, 'text/plain');
+
+      // Réordonnancement des processus
+      if (hasText && !hasJson){
+        const from = +dt.getData('text/plain'); const to=i;
+        if (!Number.isInteger(from) || from===to) return;
+        const [m]=PROCESSES.splice(from,1); PROCESSES.splice(to,0,m);
+        currentProcess = to; save(); renderAll(); selectProcess(currentProcess); return;
+      }
+
+      // Dépôt d'une SECTION vers ce process
+      if (hasJson){
+        let payload; try{ payload = JSON.parse(dt.getData(DND_MIME)||'{}'); }catch(_){ return; }
+        if (!payload || payload.kind!=='section') return;
+        const fromProc=payload.proc, fromSec=payload.sec, toProc=i;
+        if (!PROCESSES[fromProc]?.sections?.[fromSec]) return;
+        if (fromProc !== toProc){
+          const secTitle = PROCESSES[fromProc].sections[fromSec].title || '(sans titre)';
+          const ok = await confirmWarning('Déplacer la partie vers un autre processus ?',
+            `Vous allez déplacer « ${secTitle} » de « ${PROCESSES[fromProc].name} » vers « ${PROCESSES[toProc].name} ». Continuer ?`,
+            'Oui, déplacer');
+          if (!ok) return;
+        }
+        const [moved]=PROCESSES[fromProc].sections.splice(fromSec,1);
+        PROCESSES[toProc].sections.splice(0,0,moved);
+        save(); renderAll(); selectProcess(toProc); selectSection(0); toast('Partie déplacée');
+      }
     });
 
-    item.addEventListener('dragend', () => item.classList.remove('dragging'));
-
-    item.addEventListener('dragover', (e) => {
-      const isReorder =
-        e.dataTransfer.types.includes('text/plain') &&
-        !e.dataTransfer.types.includes(DND_MIME);
-      if (!isReorder) return;
-      e.preventDefault();
-      e.stopPropagation();
-      item.classList.add('drop-target');
-    });
-
-    item.addEventListener('dragleave', (e) => {
-      e.stopPropagation();
-      item.classList.remove('drop-target');
-    });
-
-    item.addEventListener('drop', (e) => {
-      // Ne gérer ici QUE le réordonnancement (text/plain), pas les items
-      if (!e.dataTransfer.types.includes('text/plain') || e.dataTransfer.types.includes(DND_MIME)) return;
-      e.preventDefault();
-      const from = +e.dataTransfer.getData('text/plain');
-      const to = i;
-      if (!Number.isInteger(from) || from === to) return;
-      const [m] = PROCESSES.splice(from, 1);
-      PROCESSES.splice(to, 0, m);
-      currentProcess = to;
-      save(); renderAll(); selectProcess(currentProcess);
-    });
-
-    if (i === currentProcess) item.style.outline = '2px solid var(--accent-2)';
     list.appendChild(item);
-  }); 
-} 
+  });
+}
 
-
-/* --- Rendu sections --- */
-/* --- Rendu sections --- */
 function renderSections(){
   const list = $('#sectionList'); list.innerHTML = '';
   const sections = S();
   sections.forEach((sec,i)=>{
-    const item = document.createElement('div');
-    item.className = 'section-item'; item.draggable = true; item.dataset.index = i;
-    item.innerHTML = `
-      <div class="drag" title="Glisser pour réorganiser">⋮⋮</div>
-      <div class="title">${sec.title || '(sans titre)'}</div>
-      <span class="pill">${(sec.fields||[]).length} item(s)</span>
-      <div class="right">
-        <button class="btn" data-act="up" title="Monter">⬆️</button>
-        <button class="btn" data-act="down" title="Descendre">⬇️</button>
-        <button class="btn" data-act="edit">Éditer</button>
-        <button class="btn danger" data-act="del">Supprimer</button>
-      </div>`;
+    const item = el('div','section-item'); item.draggable=true; item.dataset.index=i;
+
+    const drag = el('div','drag','⋮⋮'); drag.title='Glisser pour réorganiser';
+    const title = el('div','title', sec.title || '(sans titre)');
+    const pill = el('span','pill', `${(sec.fields||[]).length} item(s)`);
+    const right = el('div','right');
+    const bUp=el('button','btn','⬆️'); bUp.dataset.act='up';
+    const bDown=el('button','btn','⬇️'); bDown.dataset.act='down';
+    const bEdit=el('button','btn','Éditer'); bEdit.dataset.act='edit';
+    const bDel=el('button','btn danger','Supprimer'); bDel.dataset.act='del';
+    right.append(bUp,bDown,bEdit,bDel);
+    item.append(drag,title,pill,right);
 
     item.addEventListener('click',(e)=>{
-      const act = e.target.closest('button')?.dataset?.act || 'edit';
-      if (act==='edit'){ selectSection(i); }
+      const act=e.target.closest('button')?.dataset?.act || 'edit';
+      if (act==='edit') selectSection(i);
       else if (act==='del'){ if(confirm('Supprimer cette partie ?')){ sections.splice(i,1); selectSection(-1); save(); renderAll(); } }
       else if (act==='up'){ if(i>0){ const [m]=sections.splice(i,1); sections.splice(i-1,0,m); save(); renderAll(); selectSection(i-1); } }
       else if (act==='down'){ if(i<sections.length-1){ const [m]=sections.splice(i,1); sections.splice(i+1,0,m); save(); renderAll(); selectSection(i+1); } }
     });
 
-    item.addEventListener('dragstart',(e)=>{ item.classList.add('dragging'); e.dataTransfer.setData('text/plain', i); e.dataTransfer.effectAllowed='move'; });
-    item.addEventListener('dragend',()=> item.classList.remove('dragging'));
-
-    // Autoriser le drop d’items (field/group) AVANT cette section
-    item.addEventListener('dragover', (e) => {
-      const isReorder =
-        e.dataTransfer.types.includes('text/plain') &&
-        !e.dataTransfer.types.includes(DND_MIME);
-      if (!isReorder) return;
-      e.preventDefault();
-      e.stopPropagation();
-      item.classList.add('drop-target');
+    item.addEventListener('dragstart',(e)=>{
+      item.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', i);
+      e.dataTransfer.setData(DND_MIME, JSON.stringify({kind:'section', proc: currentProcess, sec:i}));
+      e.dataTransfer.effectAllowed='move';
     });
-
-    item.addEventListener('dragleave', (e)=>{ e.stopPropagation(); item.classList.remove('drop-target'); });
+    item.addEventListener('dragend',()=> item.classList.remove('dragging'));
+    item.addEventListener('dragover', (e)=>{ if (hasType(e.dataTransfer,'text/plain')){ e.preventDefault(); item.classList.add('drop-target'); } });
+    item.addEventListener('dragleave', ()=> item.classList.remove('drop-target'));
     item.addEventListener('drop', (e)=>{
-      // Ici: seulement réordonnancement des sections (text/plain), pas le contenu d’une section
-      if (!e.dataTransfer.types.includes('text/plain') || e.dataTransfer.types.includes(DND_MIME)) return;
+      if (!hasType(e.dataTransfer,'text/plain')) return;
       e.preventDefault();
-      const from = +e.dataTransfer.getData('text/plain'); const to = i;
+      const from=+e.dataTransfer.getData('text/plain'); const to=i;
       if (!Number.isInteger(from) || from===to) return;
       const [m]=sections.splice(from,1); sections.splice(to,0,m);
       save(); renderAll(); selectSection(to);
@@ -869,33 +841,26 @@ function renderSections(){
   });
 }
 
-/* --- Sélection contexte --- */
+/* --- Sélection / entrée --- */
 function selectProcess(i){
-  currentProcess = i;
-  currentSection = -1; editingFieldIndex = -1; editingGroupIndex = -1;
+  currentProcess=i; currentSection=-1; editingFieldIndex=-1; editingGroupIndex=-1;
   renderProcesses(); renderSections();
-  const pe = $('#processEditor');
-  const ea = $('#editorArea');
-  $('#editorTitle').textContent = 'Aucune partie sélectionnée';
+  const pe = $('#processEditor'), ea = $('#editorArea');
+  $('#editorTitle').textContent='Aucune partie sélectionnée';
   ea.classList.add('hidden');
   if (pe){
     pe.classList.remove('hidden');
-    const input = $('#procName');
-    input.value = P()?.name || '';
-    input.oninput = (e)=>{ if (P()){ P().name = e.target.value; save(); renderProcesses(); renderPreview(); } };
+    const input=$('#procName'); input.value=P()?.name || '';
+    input.oninput = (e)=>{ if(P()){ P().name=e.target.value; save(); renderProcesses(); renderPreview(); } };
   }
   renderPreview();
 }
 function selectSection(i){
-  currentSection = i;
-  const title = $('#editorTitle');
-  const area  = $('#editorArea');
-  const pe = $('#processEditor');
-  editingFieldIndex = -1; editingGroupIndex = -1;
+  currentSection=i; editingFieldIndex=-1; editingGroupIndex=-1;
+  const title=$('#editorTitle'); const area=$('#editorArea'); const pe=$('#processEditor');
   if (pe) pe.classList.add('hidden');
   if (i<0){ title.textContent='Aucune partie sélectionnée'; area.classList.add('hidden'); renderFields([]); return; }
-  title.textContent = 'Édition de la partie';
-  area.classList.remove('hidden');
+  title.textContent='Édition de la partie'; area.classList.remove('hidden');
   $('#secTitle').value = S()[i].title || '';
   renderFields(S()[i].fields || []);
   bindSectionInputs();
@@ -911,66 +876,66 @@ function bindSectionInputs(){
 }
 function refreshFieldUI(){ if (currentSection<0) return; renderFields(S()[currentSection].fields || []); }
 
-/* --- DnD take/insert --- */
+/* --- Primitives d’insertion / retrait --- */
 function getProcess(idx){ return PROCESSES[idx] || null; }
-function getSection(procIdx, secIdx){
-  const p = getProcess(procIdx); return (p && p.sections && p.sections[secIdx]) || null;
-}
+function getSection(procIdx, secIdx){ const p=getProcess(procIdx); return (p && p.sections && p.sections[secIdx]) || null; }
 
-/* Retire un item (field ou group) de sa source et le retourne */
 function takeItemFrom(payload){
-  const {kind, from, proc, sec, gi, fi, gid} = payload || {};
+  const {kind, from, proc, sec, gi, fi} = payload || {};
   const section = getSection(proc, sec); if (!section) return null;
 
   if (kind === 'field'){
     if (from === 'group'){
-      const g = section.fields?.[gi];
-      if (!g || !isGroup(g)) return null;
-      const arr = g.fields || [];
-      const [m] = arr.splice(fi, 1);
-      return isField(m) ? m : null;
-    } else { // root
-      const arr = section.fields || [];
-      const [m] = arr.splice(fi, 1);
-      return isField(m) ? m : null;
+      const g = section.fields?.[gi]; if (!g || !isGroup(g)) return null;
+      const arr = g.fields || []; const [m] = arr.splice(fi,1); return isField(m)?m:null;
+    }else{
+      const arr = section.fields || []; const [m]=arr.splice(fi,1); return isField(m)?m:null;
     }
   }
-
   if (kind === 'group' && from === 'root'){
-    const arr = section.fields || [];
-    const [m] = arr.splice(gi, 1);
-    return isGroup(m) ? m : null;
+    const arr = section.fields || []; const [m]=arr.splice(gi,1); return isGroup(m)?m:null;
   }
-
   return null;
 }
-
-/* Insère un FIELD à la racine d’une section (avant l’index si fourni) */
 function insertFieldAtRoot(procIdx, secIdx, field, beforeIdx=null){
   const sec = getSection(procIdx, secIdx); if (!sec) return;
-  const arr = sec.fields || (sec.fields = []);
+  const arr = sec.fields || (sec.fields=[]);
   const at = (beforeIdx==null || beforeIdx<0 || beforeIdx>arr.length) ? arr.length : beforeIdx;
-  arr.splice(at, 0, field);
+  arr.splice(at,0,field);
 }
-
-/* Insère un GROUP à la racine d’une section (avant l’index si fourni) */
 function insertGroupAtRoot(procIdx, secIdx, group, beforeIdx=null){
   const sec = getSection(procIdx, secIdx); if (!sec) return;
-  const arr = sec.fields || (sec.fields = []);
+  const arr = sec.fields || (sec.fields=[]);
   const at = (beforeIdx==null || beforeIdx<0 || beforeIdx>arr.length) ? arr.length : beforeIdx;
-  arr.splice(at, 0, group);
+  arr.splice(at,0,group);
+}
+function insertFieldInGroupByUid(gid, field, beforeIdx=null){
+  const { group } = findGroupByUid(gid); if (!group) return;
+  const arr = group.fields || (group.fields=[]);
+  const at = (beforeIdx==null || beforeIdx<0 || beforeIdx>arr.length) ? arr.length : beforeIdx;
+  arr.splice(at,0,field);
+}
+function findGroupByUid(uid){
+  const arr = S()[currentSection]?.fields || [];
+  const idx = arr.findIndex(g => isGroup(g) && g.__uid === uid);
+  return { index: idx, group: arr[idx] };
 }
 
-/* --- Rendu items (root + groupes) --- */
+/* --- Rendu Fields & Groupes --- */
+let _dropBusy=false; let _justDroppedAt=0;
+function beginDrop(e){ if (_dropBusy) return false; _dropBusy=true; e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.(); return true; }
+function endDrop(){ requestAnimationFrame(()=>{ save(); renderAll(); selectSection(currentSection); _dropBusy=false; }); }
+function markDrop(){ _justDroppedAt = performance.now(); }
+function isRecentDrop(){ return performance.now() - _justDroppedAt < 150; }
+
 function renderFields(items){
   const box = $('#fieldList'); box.innerHTML = '';
 
   if (!box._dndBound){
-    // Drop à la racine de la section (avant un item survolé, ou à la fin)
     box.addEventListener('dragover', (e)=>{
-      if (!e.dataTransfer.types.includes(DND_MIME)) return;
+      if (!hasType(e.dataTransfer, DND_MIME)) return;
       e.preventDefault(); e.stopPropagation();
-      if (e.target.closest('.group-fields')) return; // pas ici : ce sera géré par le container du groupe
+      if (e.target.closest('.group-fields')) return;
       box.classList.add('drop-target');
     });
     box.addEventListener('dragleave', (e)=>{
@@ -983,287 +948,220 @@ function renderFields(items){
 
       const overItem = e.target.closest('.field-item, .group-item');
       let beforeIdx = null;
-      if (overItem && !overItem.closest('.group-fields')) {
-        // Si on survole un item racine (champ ou groupe), on insère avant lui
-        beforeIdx = +overItem.dataset.index;
-      }
+      if (overItem && !overItem.closest('.group-fields')) beforeIdx = +overItem.dataset.index;
 
       const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
       const payload = JSON.parse(raw);
 
-      // Corriger l’index si on déplace dans la même liste après l’extraction
       if (beforeIdx!=null && payload.from==='root' &&
           payload.proc===currentProcess && payload.sec===currentSection){
         const isGrp = payload.kind==='group';
         const srcIdx = isGrp ? payload.gi : payload.fi;
         if (srcIdx < beforeIdx) beforeIdx -= 1;
       }
-
       const moved = takeItemFrom(payload); if (!moved) { endDrop(); return; }
-      if (isGroup(moved)) insertGroupAtRoot(currentProcess, currentSection, moved, beforeIdx);
-      else insertFieldAtRoot(currentProcess, currentSection, moved, beforeIdx);
+      if (isGroup(moved)) insertGroupAtRoot(currentProcess,currentSection,moved,beforeIdx);
+      else insertFieldAtRoot(currentProcess,currentSection,moved,beforeIdx);
 
-      e.dataTransfer.dropEffect = 'move';
+      e.dataTransfer.dropEffect='move';
       markDrop(); endDrop();
     });
-
     box._dndBound = true;
   }
 
   (items||[]).forEach((it, idx)=>{
-    if (isGroup(it)) {
-      // ======= GROUPE RACINE =======
-      const g = document.createElement('div');
-      g.className = 'group-item'; g.dataset.index = idx; g.dataset.gid = it.__uid;
-      g.draggable = true;
-      g.innerHTML = `
-        <div class="group-head">
-          <input type="checkbox" class="select-box" data-kind="group" data-index="${idx}" title="Sélectionner"/>
-          <div class="group-title">${it.label || it.name || '(groupe)'}</div>
-          <div class="group-meta pill">required: ${!!it.required} • repeatable: ${!!it.repeatable}</div>
-          <div class="right">
-            <button class="btn" data-act="up">⬆️</button>
-            <button class="btn" data-act="down">⬇️</button>
-            <button class="btn" data-act="edit">Éditer</button>
-            <button class="btn danger" data-act="del">Supprimer</button>
-          </div>
-        </div>
-        <div class="group-fields"></div>
-      `;
+    if (isGroup(it)){
+      const g = el('div','group-item'); g.dataset.index=idx; g.dataset.gid=it.__uid; g.draggable=true;
 
-      /* Drag du groupe (root only) */
-      g.addEventListener('dragstart', (e)=>{
+      const head = el('div','group-head');
+      const sel  = document.createElement('input'); sel.type='checkbox'; sel.className='select-box'; sel.dataset.kind='group'; sel.dataset.index=idx; sel.title='Sélectionner';
+      const ttl  = el('div','group-title', it.label || it.name || '(groupe)');
+      const meta = el('div','group-meta', `required: ${!!it.required} • repeatable: ${!!it.repeatable}`); meta.classList.add('pill');
+
+      const right = el('div','right');
+      const bUp=el('button','btn','⬆️'); bUp.dataset.act='up';
+      const bDown=el('button','btn','⬇️'); bDown.dataset.act='down';
+      const bEdit=el('button','btn','Éditer'); bEdit.dataset.act='edit';
+      const bDel=el('button','btn danger','Supprimer'); bDel.dataset.act='del';
+      right.append(bUp,bDown,bEdit,bDel);
+
+      head.append(sel, ttl, meta, right);
+      const inner = el('div','group-fields');
+
+      // Drag du groupe
+      g.addEventListener('dragstart',(e)=>{
         g.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData(DND_MIME, JSON.stringify({
-          kind:'group', from:'root', proc: currentProcess, sec: currentSection, gi: idx, gid: it.__uid
-        }));
+        e.dataTransfer.effectAllowed='move';
+        e.dataTransfer.setData(DND_MIME, JSON.stringify({kind:'group',from:'root',proc:currentProcess,sec:currentSection,gi:idx,gid:it.__uid}));
       });
-      g.addEventListener('dragend', ()=> g.classList.remove('dragging'));
-
-      /* Déposer un ITEM (field ou group) avant ce groupe */
-      g.addEventListener('dragover', (e)=>{
-        if (!e.dataTransfer.types.includes(DND_MIME)) return;
-        e.preventDefault(); e.stopPropagation();
-        g.classList.add('drop-before');
-      });
-      g.addEventListener('dragleave', (e)=>{ e.stopPropagation(); g.classList.remove('drop-before'); });
-      g.addEventListener('drop', (e)=>{
+      g.addEventListener('dragend',()=> g.classList.remove('dragging'));
+      g.addEventListener('dragover',(e)=>{ if (hasType(e.dataTransfer,DND_MIME)){ e.preventDefault(); e.stopPropagation(); g.classList.add('drop-before'); }});
+      g.addEventListener('dragleave',()=> g.classList.remove('drop-before'));
+      g.addEventListener('drop',(e)=>{
         if (!beginDrop(e)) return;
         g.classList.remove('drop-before');
-
-        const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
-        const payload = JSON.parse(raw);
-
-        // Prendre l’item de sa source
-        const moved = takeItemFrom(payload); if (!moved) { endDrop(); return; }
-
-        // Destination = AVANT ce groupe
-        const destProc = currentProcess;
-        const destSec  = currentSection;
-        let destIndex  = idx;
-        // Ajuste si on vient de la même liste
+        const payload = JSON.parse(e.dataTransfer.getData(DND_MIME) || '{}');
+        const moved = takeItemFrom(payload); if (!moved){ endDrop(); return; }
+        let destIndex = idx;
         if (payload.kind==='group' && payload.from==='root' &&
-            payload.proc===destProc && payload.sec===destSec && payload.gi < destIndex){
-          destIndex -= 1;
-        }
-
-        if (isGroup(moved)) {
-          insertGroupAtRoot(destProc, destSec, moved, destIndex);
-        } else if (isField(moved)) {
-          insertFieldAtRoot(destProc, destSec, moved, destIndex);
-        }
-
-        e.dataTransfer.dropEffect = 'move';
-        markDrop(); endDrop();
+            payload.proc===currentProcess && payload.sec===currentSection && payload.gi < destIndex) destIndex -= 1;
+        if (isGroup(moved)) insertGroupAtRoot(currentProcess,currentSection,moved,destIndex);
+        else insertFieldAtRoot(currentProcess,currentSection,moved,destIndex);
+        e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
       });
 
-      const inner = g.querySelector('.group-fields');
-
-      // ======= CONTENEUR DU GROUPE (déposer un CHAMP à l'intérieur, à la fin) =======
-      inner.addEventListener('dragover', (e)=>{
-        if (!e.dataTransfer.types.includes(DND_MIME)) return;
-        e.preventDefault(); e.stopPropagation();
-        inner.classList.add('drop-target');
-      });
-      inner.addEventListener('dragleave', (e)=>{
-        e.stopPropagation();
-        if (!inner.contains(e.relatedTarget)) inner.classList.remove('drop-target');
-      });
-      inner.addEventListener('drop', (e)=>{
+      // Conteneur du groupe
+      inner.addEventListener('dragover',(e)=>{ if (hasType(e.dataTransfer,DND_MIME)){ e.preventDefault(); e.stopPropagation(); inner.classList.add('drop-target'); }});
+      inner.addEventListener('dragleave',(e)=>{ e.stopPropagation(); if (!inner.contains(e.relatedTarget)) inner.classList.remove('drop-target'); });
+      inner.addEventListener('drop',(e)=>{
         if (!beginDrop(e)) return;
         inner.classList.remove('drop-target');
-
-        const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
-        const payload = JSON.parse(raw);
-        if (payload.kind !== 'field'){ endDrop(); return; } // pas de groupe dans un groupe
-
+        const payload = JSON.parse(e.dataTransfer.getData(DND_MIME) || '{}');
+        if (payload.kind !== 'field'){ endDrop(); return; }
         const moved = takeItemFrom(payload); if (!moved || !isField(moved)) { endDrop(); return; }
         insertFieldInGroupByUid(g.dataset.gid, moved, null);
-
-        e.dataTransfer.dropEffect = 'move';
-        markDrop(); endDrop();
+        e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
       });
 
-      // ======= CHAMPS À L’INTÉRIEUR DU GROUPE =======
-      (it.fields||[]).forEach((f, j)=>{
-        const item = document.createElement('div');
-        item.className = 'field-item'; item.draggable = true; item.dataset.index = `${idx}:${j}`;
-        const optInfo = isOptType(f.type) ? ` <span class="muted">[${(f.options||[]).join(', ')}]</span>` : '';
-        const hasTip = !!(f.tips && f.tips.text && f.tips.text.trim());
-        const tipBadge = hasTip ? ' <span class="pill">Astuce</span>' : '';
-        item.innerHTML = `
-          <div class="drag" title="Glisser pour réorganiser/déplacer">⋮</div>
-          <input type="checkbox" class="select-box" data-kind="field-in-group" data-index="${idx}:${j}" title="Sélectionner"/>
-          <div class="meta">
-            <div><strong>${f.label || f.name || '(sans nom)'}</strong> <span class="muted">(${f.type})</span>${optInfo}${tipBadge}</div>
-            <div class="muted">name: ${f.name || '—'} • required: ${!!f.required} • repeatable: ${!!f.repeatable}</div>
-          </div>
-          <div class="right">
-            <button class="btn" data-act="up">⬆️</button>
-            <button class="btn" data-act="down">⬇️</button>
-            <button class="btn" data-act="edit">Éditer</button>
-            <button class="btn danger" data-act="del">Supprimer</button>
-          </div>`;
+      (it.fields||[]).forEach((f,j)=>{
+        const item = el('div','field-item'); item.draggable=true; item.dataset.index=`${idx}:${j}`;
+        const drag = el('div','drag','⋮'); drag.title='Glisser pour réorganiser/déplacer';
+        const cb = document.createElement('input'); cb.type='checkbox'; cb.className='select-box'; cb.dataset.kind='field-in-group'; cb.dataset.index=`${idx}:${j}`; cb.title='Sélectionner';
+        const meta = el('div','meta');
+        const title = el('div',null);
+        const strong = el('strong',null, f.label || f.name || '(sans nom)');
+        const muted = el('span','muted', ` (${f.type})`);
+        title.append(strong, muted);
+        if (isOptType(f.type)){
+          const opts = el('span','muted', ` [${(f.options||[]).join(', ')}]`); title.append(' ', opts);
+        }
+        if (f.tips && (f.tips.text||'').trim()){
+          const badge = el('span','pill','Astuce'); title.append(' ', badge);
+        }
+        const sub = el('div','muted', `name: ${f.name || '—'} • required: ${!!f.required} • repeatable: ${!!f.repeatable}`);
+        meta.append(title, sub);
 
-        // dragstart: champ en groupe
-        item.addEventListener('dragstart', (e)=>{
+        const right = el('div','right');
+        const bUp=el('button','btn','⬆️'); bUp.dataset.act='up';
+        const bDown=el('button','btn','⬇️'); bDown.dataset.act='down';
+        const bEdit=el('button','btn','Éditer'); bEdit.dataset.act='edit';
+        const bDel=el('button','btn danger','Supprimer'); bDel.dataset.act='del';
+        right.append(bUp,bDown,bEdit,bDel);
+
+        item.append(drag, cb, meta, right);
+
+        item.addEventListener('dragstart',(e)=>{
           item.classList.add('dragging');
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData(DND_MIME, JSON.stringify({
-            kind:'field', from:'group', proc: currentProcess, sec: currentSection, gi: idx, fi: j, gid: it.__uid
-          }));
+          e.dataTransfer.effectAllowed='move';
+          e.dataTransfer.setData(DND_MIME, JSON.stringify({kind:'field',from:'group',proc:currentProcess,sec:currentSection,gi:idx,fi:j,gid:it.__uid}));
         });
-        item.addEventListener('dragend', ()=> item.classList.remove('dragging'));
-
-        // drop-before sur un champ de ce groupe (réordonne dans ce groupe)
-        item.addEventListener('dragover', (e)=>{
-          if (!e.dataTransfer.types.includes(DND_MIME)) return;
-          e.preventDefault(); e.stopPropagation();
-          item.classList.add('drop-before');
-        });
-        item.addEventListener('dragleave', (e)=>{ e.stopPropagation(); item.classList.remove('drop-before'); });
-        item.addEventListener('drop', (e)=>{
+        item.addEventListener('dragend',()=> item.classList.remove('dragging'));
+        item.addEventListener('dragover',(e)=>{ if (hasType(e.dataTransfer,DND_MIME)){ e.preventDefault(); e.stopPropagation(); item.classList.add('drop-before'); }});
+        item.addEventListener('dragleave',()=> item.classList.remove('drop-before'));
+        item.addEventListener('drop',(e)=>{
           if (!beginDrop(e)) return;
           item.classList.remove('drop-before');
-
-          const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
-          const payload = JSON.parse(raw);
-          if (payload.kind !== 'field'){ endDrop(); return; } // pas de groupe dans un groupe
-
-          // destination: avant cet item J dans ce groupe
+          const payload = JSON.parse(e.dataTransfer.getData(DND_MIME) || '{}');
+          if (payload.kind !== 'field'){ endDrop(); return; }
           let dest = j;
-          if (payload.from === 'group' && payload.gid === it.__uid && payload.fi < dest) dest -= 1;
-
-          const moved = takeItemFrom(payload); if (!moved || !isField(moved)) { endDrop(); return; }
+          if (payload.from==='group' && payload.gid===it.__uid && payload.fi < dest) dest -= 1;
+          const moved = takeItemFrom(payload); if (!moved || !isField(moved)){ endDrop(); return; }
           insertFieldInGroupByUid(it.__uid, moved, dest);
-
-          e.dataTransfer.dropEffect = 'move';
-          markDrop(); endDrop();
-        });
-
-        // Actions boutons
-        item.addEventListener('click', (e)=>{
-          if (isRecentDrop()) return;
-          const act = e.target.closest('button')?.dataset?.act || 'edit';
-          const arr = S()[currentSection].fields[idx].fields;
-          if (act==='edit'){
-            editingGroupIndex = idx; editingFieldIndex = j;
-            openFieldEditor(arr[j]);
-            renderPreview();
-          } else if (act==='del'){
-            if (confirm('Supprimer ce champ du groupe ?')){
-              arr.splice(j,1); editingFieldIndex=-1; save(); renderAll(); selectSection(currentSection);
-              toast('Champ supprimé');
-            }
-          } else if (act==='up'){
-            if (j>0){ const [m]=arr.splice(j,1); arr.splice(j-1,0,m); save(); renderAll(); selectSection(currentSection); }
-          } else if (act==='down'){
-            if (j<arr.length-1){ const [m]=arr.splice(j,1); arr.splice(j+1,0,m); save(); renderAll(); selectSection(currentSection); }
-          }
+          e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
         });
 
         inner.appendChild(item);
       });
 
-      box.appendChild(g);
-    } else {
-      // ======= CHAMP RACINE =======
-      const f = it;
-      const item = document.createElement('div');
-      item.className = 'field-item'; item.draggable = true; item.dataset.index = idx;
-      const optInfo = isOptType(f.type) ? ` <span class="muted">[${(f.options||[]).join(', ')}]</span>` : '';
-      const hasTip = !!(f.tips && f.tips.text && f.tips.text.trim());
-      const tipBadge = hasTip ? ' <span class="pill">Astuce</span>' : '';
-      item.innerHTML = `
-        <div class="drag" title="Glisser pour réorganiser/déplacer">⋮</div>
-        <input type="checkbox" class="select-box" data-kind="field-root" data-index="${idx}" title="Sélectionner"/>
-        <div class="meta">
-          <div><strong>${f.label || f.name || '(sans nom)'}</strong> <span class="muted">(${f.type})</span>${optInfo}${tipBadge}</div>
-          <div class="muted">name: ${f.name || '—'} • required: ${!!f.required} • repeatable: ${!!f.repeatable}</div>
-        </div>
-        <div class="right">
-          <button class="btn" data-act="up">⬆️</button>
-          <button class="btn" data-act="down">⬇️</button>
-          <button class="btn" data-act="edit">Éditer</button>
-          <button class="btn danger" data-act="del">Supprimer</button>
-        </div>`;
-
-      // dragstart: champ racine
-      item.addEventListener('dragstart', (e)=>{
-        item.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData(DND_MIME, JSON.stringify({
-          kind:'field', from:'root', proc: currentProcess, sec: currentSection, fi: +item.dataset.index
-        }));
-      });
-      item.addEventListener('dragend', ()=> item.classList.remove('dragging'));
-
-      // drop-before (insérer avant cet item racine)
-      item.addEventListener('dragover', (e)=>{
-        if (!e.dataTransfer.types.includes(DND_MIME)) return;
-        e.preventDefault(); e.stopPropagation();
-        item.classList.add('drop-before');
-      });
-      item.addEventListener('dragleave', (e)=>{ e.stopPropagation(); item.classList.remove('drop-before'); });
-      item.addEventListener('drop', (e)=>{
-        if (!beginDrop(e)) return;
-        item.classList.remove('drop-before');
-
-        const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
-        const payload = JSON.parse(raw);
-
-        // destination: avant cet item
-        let dest = +item.dataset.index;
-        if (payload.from === 'root' &&
-            payload.proc === currentProcess &&
-            payload.sec  === currentSection) {
-          const srcIdx = (payload.kind === 'group') ? payload.gi : payload.fi;
-          if (srcIdx < dest) dest -= 1;
-        }
-
-        const moved = takeItemFrom(payload); if (!moved) { endDrop(); return; }
-        if (isGroup(moved)) insertGroupAtRoot(currentProcess, currentSection, moved, dest);
-        else insertFieldAtRoot(currentProcess, currentSection, moved, dest);
-
-        e.dataTransfer.dropEffect = 'move';
-        markDrop(); endDrop();
-      });
-
-      // Actions boutons
-      item.addEventListener('click', (e)=>{
+      g.append(head, inner);
+      g.addEventListener('click',(e)=>{
         if (isRecentDrop()) return;
-        const act = e.target.closest('button')?.dataset?.act || 'edit';
+        const act=e.target.closest('button')?.dataset?.act;
+        if (!act) return;
         const arr = S()[currentSection].fields;
         if (act==='edit'){
-          editingGroupIndex = -1; editingFieldIndex = idx;
+          editingGroupIndex=idx; editingFieldIndex=-1;
+          $('#groupEditor')?.classList.remove('hidden');
+          $('#editorArea')?.classList.remove('hidden');
+          $('#grpName').value = it.name || '';
+          $('#grpLabel').value = it.label || '';
+          $('#grpRequired').value = it.required ? 'true' : 'false';
+          $('#grpRepeatable').value = it.repeatable ? 'true' : 'false';
+        } else if (act==='del'){
+          if (confirm('Supprimer le groupe ?')){ arr.splice(idx,1); editingGroupIndex=-1; save(); renderAll(); selectSection(currentSection); toast('Groupe supprimé'); }
+        } else if (act==='up'){
+          if (idx>0){ const [m]=arr.splice(idx,1); arr.splice(idx-1,0,m); save(); renderAll(); selectSection(currentSection); }
+        } else if (act==='down'){
+          if (idx<arr.length-1){ const [m]=arr.splice(idx,1); arr.splice(idx+1,0,m); save(); renderAll(); selectSection(currentSection); }
+        }
+      });
+
+      box.appendChild(g);
+    } else {
+      const f = it;
+      const item = el('div','field-item'); item.draggable=true; item.dataset.index=idx;
+
+      const drag = el('div','drag','⋮'); drag.title='Glisser pour réorganiser/déplacer';
+      const cb = document.createElement('input'); cb.type='checkbox'; cb.className='select-box'; cb.dataset.kind='field-root'; cb.dataset.index=idx; cb.title='Sélectionner';
+
+      const meta = el('div','meta');
+      const title = el('div',null);
+      const strong = el('strong',null, f.label || f.name || '(sans nom)');
+      const muted = el('span','muted', ` (${f.type})`);
+      title.append(strong, muted);
+      if (isOptType(f.type)){
+        const opts = el('span','muted', ` [${(f.options||[]).join(', ')}]`); title.append(' ', opts);
+      }
+      if (f.tips && (f.tips.text||'').trim()){
+        const badge = el('span','pill','Astuce'); title.append(' ', badge);
+      }
+      const sub = el('div','muted', `name: ${f.name || '—'} • required: ${!!f.required} • repeatable: ${!!f.repeatable}`);
+      meta.append(title, sub);
+
+      const right = el('div','right');
+      const bUp=el('button','btn','⬆️'); bUp.dataset.act='up';
+      const bDown=el('button','btn','⬇️'); bDown.dataset.act='down';
+      const bEdit=el('button','btn','Éditer'); bEdit.dataset.act='edit';
+      const bDel=el('button','btn danger','Supprimer'); bDel.dataset.act='del';
+      right.append(bUp,bDown,bEdit,bDel);
+
+      item.append(drag, cb, meta, right);
+
+      item.addEventListener('dragstart',(e)=>{
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed='move';
+        e.dataTransfer.setData(DND_MIME, JSON.stringify({kind:'field',from:'root',proc:currentProcess,sec:currentSection,fi:+item.dataset.index}));
+      });
+      item.addEventListener('dragend',()=> item.classList.remove('dragging'));
+      item.addEventListener('dragover',(e)=>{ if (hasType(e.dataTransfer,DND_MIME)){ e.preventDefault(); e.stopPropagation(); item.classList.add('drop-before'); }});
+      item.addEventListener('dragleave',()=> item.classList.remove('drop-before'));
+      item.addEventListener('drop',(e)=>{
+        if (!beginDrop(e)) return;
+        item.classList.remove('drop-before');
+        const payload = JSON.parse(e.dataTransfer.getData(DND_MIME) || '{}');
+
+        let dest = +item.dataset.index;
+        if (payload.from==='root' && payload.proc===currentProcess && payload.sec===currentSection){
+          const srcIdx = (payload.kind==='group') ? payload.gi : payload.fi;
+          if (srcIdx < dest) dest -= 1;
+        }
+        const moved = takeItemFrom(payload); if (!moved){ endDrop(); return; }
+        if (isGroup(moved)) insertGroupAtRoot(currentProcess,currentSection,moved,dest);
+        else insertFieldAtRoot(currentProcess,currentSection,moved,dest);
+
+        e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
+      });
+
+      item.addEventListener('click',(e)=>{
+        if (isRecentDrop()) return;
+        const act=e.target.closest('button')?.dataset?.act || 'edit';
+        const arr = S()[currentSection].fields;
+        if (act==='edit'){
+          editingGroupIndex=-1; editingFieldIndex=idx;
           openFieldEditor(arr[idx]);
           renderPreview();
         } else if (act==='del'){
-          if (confirm('Supprimer ce champ ?')){
-            arr.splice(idx,1); editingFieldIndex=-1; save(); renderAll(); selectSection(currentSection);
-            toast('Champ supprimé');
-          }
+          if (confirm('Supprimer ce champ ?')){ arr.splice(idx,1); editingFieldIndex=-1; save(); renderAll(); selectSection(currentSection); toast('Champ supprimé'); }
         } else if (act==='up'){
           if (idx>0){ const [m]=arr.splice(idx,1); arr.splice(idx-1,0,m); save(); renderAll(); selectSection(currentSection); }
         } else if (act==='down'){
@@ -1276,111 +1174,100 @@ function renderFields(items){
   });
 }
 
-/* --- Export JSON --- */
+function openFieldEditor(f){
+  const area=$('#editorArea'); area?.classList.remove('hidden');
+  $('#groupEditor')?.classList.add('hidden');
+  $('#fldName').value = f.label || '';
+  $('#fldLabel').value = f.label || '';
+  $('#fldType').value = f.type || 'text';
+  $('#fldRequired').value = f.required ? 'true' : 'false';
+  $('#fldRepeatable').value = f.repeatable ? 'true' : 'false';
+  $('#fldOptions').value = (Array.isArray(f.options)? f.options : []).join(', ');
+  $('#fldTipsIcon').value = (f.tips?.icon)||'';
+  $('#fldTips').value = (f.tips?.text)||'';
+  updateTipsPreview(f);
+  updateOptionsVisibility();
+  $('#fldName').focus();
+}
+
+function renderAll(){ renderProcesses(); renderSections(); renderPreview(); }
+
+/* --- Aperçu JSON --- */
 function cleanItem(it){
   if (isGroup(it)){
-    const g = { group:{
-      name:(it.name||'').trim(),
-      ...(it.label? {label:String(it.label).trim()} : {}),
-      ...(it.required? {required:true} : {}),
-      ...(it.repeatable? {repeatable:true} : {}),
-    }};
+    const g = { group:{ name:(it.name||'').trim(), ...(it.label?{label:String(it.label).trim()}:{}), ...(it.required?{required:true}:{}) , ...(it.repeatable?{repeatable:true}:{}) } };
     g.fields = (it.fields||[]).filter(isField).map(f=>{
-      const out = { name:(f.name||'').trim(), type:f.type||'text' };
-      if (f.label) out.label = String(f.label).trim();
-      if (f.repeatable) out.repeatable = true;
-      if (f.required) out.required = true;
-      if (isOptType(f.type)) out.options = (f.options||[]).filter(x=>String(x).trim()!=='').map(String);
+      const out={ name:(f.name||'').trim(), type:f.type||'text' };
+      if (f.label) out.label=String(f.label).trim();
+      if (f.repeatable) out.repeatable=true;
+      if (f.required) out.required=true;
+      if (isOptType(f.type)) out.options=(f.options||[]).filter(x=>String(x).trim()!=='').map(String);
       if (f.tips && (String(f.tips.icon||'').trim() || String(f.tips.text||'').trim())){
-        out.tips = {
-          ...(f.tips.icon ? { icon: String(f.tips.icon) } : {}),
-          ...(f.tips.text ? { text: String(f.tips.text) } : {})
-        };
+        out.tips = { ...(f.tips.icon?{icon:String(f.tips.icon)}:{}), ...(f.tips.text?{text:String(f.tips.text)}:{}) };
       }
       return out;
     });
     return g;
   }
-  const out = { name:(it.name||'').trim(), type:it.type||'text' };
-  if (it.label) out.label = String(it.label).trim();
-  if (it.repeatable) out.repeatable = true;
-  if (it.required) out.required = true;
-  if (isOptType(it.type)) out.options = (it.options||[]).filter(x=>String(x).trim()!=='').map(String);
+  const out={ name:(it.name||'').trim(), type:it.type||'text' };
+  if (it.label) out.label=String(it.label).trim();
+  if (it.repeatable) out.repeatable=true;
+  if (it.required) out.required=true;
+  if (isOptType(it.type)) out.options=(it.options||[]).filter(x=>String(x).trim()!=='').map(String);
   if (it.tips && (String(it.tips.icon||'').trim() || String(it.tips.text||'').trim())){
-    out.tips = {
-      ...(it.tips.icon ? { icon: String(it.tips.icon) } : {}),
-      ...(it.tips.text ? { text: String(it.tips.text) } : {})
-    };
+    out.tips = { ...(it.tips.icon?{icon:String(it.tips.icon)}:{}), ...(it.tips.text?{text:String(it.tips.text)}:{}) };
   }
   return out;
 }
 function getCleanModel(){
   return PROCESSES
     .filter(p=>p.enabled!==false)
-    .map(p=>({
-      name: (p.name||'').trim(),
-      sections: (p.sections||[]).map(sec=>({
-        title: (sec.title||'').trim(),
-        fields: (sec.fields||[]).map(cleanItem)
-      }))
-    }));
+    .map(p=>({ name:(p.name||'').trim(), sections:(p.sections||[]).map(sec=>({ title:(sec.title||'').trim(), fields:(sec.fields||[]).map(cleanItem) })) }));
 }
 function renderPreview(){
-  const clean = getCleanModel();
+  const clean=getCleanModel();
   $('#jsonPreview').textContent = JSON.stringify(clean, null, 2);
-  const procs = clean.length;
-  const secs  = clean.reduce((a,p)=> a + (p.sections?.length||0), 0);
-  const items = clean.reduce((a,p)=> a + (p.sections||[]).reduce((b,s)=> b + (s.fields?.length||0),0), 0);
+  const procs=clean.length;
+  const secs = clean.reduce((a,p)=> a+(p.sections?.length||0),0);
+  const items=clean.reduce((a,p)=> a+(p.sections||[]).reduce((b,s)=> b+(s.fields?.length||0),0),0);
   $('#countProcesses').textContent = procs + ' processus';
   $('#countSections').textContent  = secs  + ' partie' + (secs>1?'s':'');
   $('#countFields').textContent    = items + ' item' + (items>1?'s':'');
 }
 
-/* --- Ajouts --- */
-function createSection(){
-  const p = P(); if (!p) return;
-  p.sections.push(makeSection());
-  editingGroupIndex = -1; editingFieldIndex = -1;
-  save(); renderAll(); selectSection(p.sections.length-1);
-  toast('Partie ajoutée');
-}
+/* --- Éditeurs & actions --- */
+function bindAddButtons(){ $('#btnAddFieldTop').onclick = addNewField; $('#btnAddFieldSticky').onclick = addNewField; }
+function updateOptionsVisibility(){ const t = $('#fldType').value; $('#rowOptions').style.display = isOptType(t) ? '' : 'none'; }
+
 function addNewField(){
   if (currentSection<0) createSection();
   const sec = S()[currentSection];
-  const to = (editingGroupIndex>=0 && isGroup(sec.fields[editingGroupIndex]))
-    ? sec.fields[editingGroupIndex].fields
-    : (sec.fields || (sec.fields=[]));
+  const to = (editingGroupIndex>=0 && isGroup(sec.fields[editingGroupIndex])) ? sec.fields[editingGroupIndex].fields : (sec.fields || (sec.fields=[]));
   const f = makeField();
-  f.label = '';
-  f.name  = uniqueName(tinyName('champ'));
+  f.name = uniqueName(tinyName('champ'));
   to.push(f);
   editingFieldIndex = to.length - 1;
-  $('#fldName').value=''; $('#fldLabel').value='';
-  $('#fldType').value='text'; $('#fldRequired').value='false';
-  $('#fldRepeatable').value='false'; $('#fldOptions').value='';
-  $('#fldTipsIcon').value=''; $('#fldTips').value='';
-  updateTipsPreview(f);
-  updateOptionsVisibility();
-  renderFields(sec.fields);
-  $('#fldName').focus();
+  $('#fldName').value=''; $('#fldLabel').value=''; $('#fldType').value='text';
+  $('#fldRequired').value='false'; $('#fldRepeatable').value='false'; $('#fldOptions').value='';
+  $('#fldTipsIcon').value=''; $('#fldTips').value=''; updateTipsPreview(f);
+  updateOptionsVisibility(); renderFields(sec.fields); $('#fldName').focus();
   save(); renderPreview(); toast('Champ ajouté');
 }
-function bindAddButtons(){ $('#btnAddFieldTop').onclick = addNewField; $('#btnAddFieldSticky').onclick = addNewField; }
-function updateOptionsVisibility(){ const t = $('#fldType').value; $('#rowOptions').style.display = isOptType(t) ? '' : 'none'; }
+
 function groupSelected(){
   if (currentSection<0) return;
   const sec = S()[currentSection]; const arr = sec.fields || (sec.fields=[]);
   const selected = $$('.select-box[data-kind="field-root"]:checked').map(cb => +cb.dataset.index).sort((a,b)=>a-b);
   if (selected.length < 1){ toast('Sélectionne au moins un champ racine'); return; }
-  const group = makeGroup(); group.label = 'Nouveau groupe'; group.name = uniqueName(tinyName(group.label || 'groupe'));
-  const moved = [];
-  for (let i = selected.length-1; i>=0; i--){ const idx = selected[i]; const it = arr[idx]; if (isField(it)) { moved.unshift(it); arr.splice(idx,1); } }
-  if (moved.length===0){ toast('Aucun champ racine sélectionné'); return; }
-  group.fields = moved; arr.push(group);
+  const group = makeGroup(); group.label='Nouveau groupe'; group.name = uniqueName(tinyName(group.label||'groupe'));
+  const moved=[];
+  for (let i=selected.length-1;i>=0;i--){ const idx=selected[i]; const it=arr[idx]; if (isField(it)){ moved.unshift(it); arr.splice(idx,1); } }
+  if (!moved.length){ toast('Aucun champ racine sélectionné'); return; }
+  group.fields=moved; arr.push(group);
   save(); renderAll(); selectSection(currentSection); toast('Champs regroupés');
 }
 
-/* --- Validation import --- */
+/* Import / validation */
 function validateTemplate(tpl){
   if (!Array.isArray(tpl)) return { valid:false, reason:'Racine non tableau (processus[])' };
   for (let i=0;i<tpl.length;i++){
@@ -1389,21 +1276,21 @@ function validateTemplate(tpl){
     if (!('name' in p)) return { valid:false, reason:`processus[${i}] sans "name"` };
     if (!Array.isArray(p.sections)) return { valid:false, reason:`processus[${i}].sections doit être un tableau` };
     for (let s=0;s<p.sections.length;s++){
-      const sec = p.sections[s] || {};
-      if (typeof sec !== 'object') return { valid:false, reason:`sections[${s}] non objet` };
+      const sec=p.sections[s]||{};
+      if (typeof sec!=='object') return { valid:false, reason:`sections[${s}] non objet` };
       if (!('title' in sec)) return { valid:false, reason:`sections[${s}] sans "title"` };
       if (sec.fields && !Array.isArray(sec.fields)) return { valid:false, reason:`sections[${s}].fields doit être un tableau` };
-      const fields = sec.fields || [];
+      const fields=sec.fields||[];
       for (let j=0;j<fields.length;j++){
-        const f = fields[j] || {};
-        const isGrp = ('group' in f) && typeof f.group === 'object' && Array.isArray(f.fields);
-        const isFld = ('name' in f) && ('type' in f);
+        const f=fields[j]||{};
+        const isGrp=('group' in f)&&typeof f.group==='object'&&Array.isArray(f.fields);
+        const isFld=('name' in f)&&('type' in f);
         if (!isGrp && !isFld) return { valid:false, reason:`fields[${j}] doit être un champ (name/type) ou un groupe (group/fields)` };
         if (isFld && (f.type==='radio'||f.type==='select') && f.options && !Array.isArray(f.options))
           return { valid:false, reason:`fields[${j}].options doit être un tableau` };
         if (isGrp){
           for (let k=0;k<f.fields.length;k++){
-            const gch = f.fields[k] || {};
+            const gch=f.fields[k]||{};
             if (!gch.name) return { valid:false, reason:`group.fields[${k}] sans "name"` };
             if (!gch.type) return { valid:false, reason:`group.fields[${k}] sans "type"` };
             if ((gch.type==='radio'||gch.type==='select') && gch.options && !Array.isArray(gch.options))
@@ -1416,36 +1303,131 @@ function validateTemplate(tpl){
   return { valid:true };
 }
 
-/* --- Bind inputs (live) --- */
+/* UML SVG (sans canvas ; pas d’export PNG) */
+function safeCssVar(name, fallback){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback; }
+function generateUmlSVGFor(proc){
+  if (!proc) return '';
+  const sections = (proc.sections||[]);
+  const W = 1200, PAD=24, COLW=W-PAD*2, BOXR=12;
+  const BG     = safeCssVar('--bg','#f6f7fb');
+  const FG     = safeCssVar('--fg','#111827');
+  const PANEL  = safeCssVar('--panel','#ffffff');
+  const BORDER = safeCssVar('--card-border','#e5e7eb');
+  const ACCENT = safeCssVar('--accent','#2563eb');
+  const MUTED  = safeCssVar('--muted','#6b7280');
+
+  const wrapTitle = (t)=> wrapByChars(t, 80);
+  const wrapLine  = (t)=> wrapByChars(t, 120);
+
+  const nodes = [{ kind:'start', title:'Start', w:260, h:40 }];
+  let nodesSum = 0;
+  sections.forEach((sec, si)=>{
+    const titleLines = wrapTitle(sec.title || '(section)');
+    let innerH = titleLines.length*20 + 8;
+    const items=[];
+    (sec.fields||[]).forEach(it=>{
+      if (isGroup(it)){
+        const head = `Groupe: ${it.label || it.name || '(groupe)'}  • req:${!!it.required} • rep:${!!it.repeatable}`;
+        items.push({t:head, type:'group-head'});
+        (it.fields||[]).forEach(f=>{
+          const opts=(isOptType(f.type)&&Array.isArray(f.options)&&f.options.length)?` [${f.options.join(', ')}]`:'';
+          const tip =(f.tips&&f.tips.text&&f.tips.text.trim())?' • 💡':'';
+          items.push({t:`• ${f.label || f.name || '(champ)'} (${f.type}) • req:${!!f.required} • rep:${!!f.repeatable}${opts}${tip}`, type:'group-item'});
+        });
+        items.push({t:'',type:'spacer'});
+      }else{
+        const f=it;
+        const opts=(isOptType(f.type)&&Array.isArray(f.options)&&f.options.length)?` [${f.options.join(', ')}]`:'';
+        const tip =(f.tips&&f.tips.text&&f.tips.text.trim())?' • 💡':'';
+        items.push({t:`• ${f.label || f.name || '(champ)'} (${f.type}) • req:${!!f.required} • rep:${!!f.repeatable}${opts}${tip}`, type:'field'});
+      }
+    });
+    items.forEach(l=>{ const ls=wrapLine(l.t); l._lines=ls; innerH += (ls.length||1)*20 + (l.type==='spacer'?8:0); });
+    const h = innerH+32;
+    nodes.push({ kind:'section', titleLines, items, w:COLW, h, index:si });
+    nodesSum += h + 24;
+  });
+  nodes.push({ kind:'end', title:'End', w:260, h:40 }); nodesSum += 40 + 24 + 40;
+
+  const procLines = wrapTitle(proc.name || '(processus)');
+  const subtitle  = `${sections.length} partie(s) • export: ${new Date().toLocaleString()}`;
+  const subLines  = wrapByChars(subtitle, 90);
+  const headerH   = procLines.length*20 + 8 + subLines.length*18 + 10;
+  const totalH    = PAD + headerH + nodesSum + PAD;
+
+  const esc = s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const textLines=(x,yTop,lines,{family='Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial',size=14,weight=400,fill=FG,line=20})=>{
+    let out='', y=yTop; for(const ln of lines){ out+=`<text x="${x}" y="${y}" font-family="${family}" font-size="${size}px" font-weight="${weight}" fill="${fill}">${esc(ln)}</text>`; y+=line; } return out;
+  };
+  const rect=(x,y,w,h,r,fill,stroke)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${fill}" stroke="${stroke}" />`;
+
+  let y=PAD, out=[];
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${totalH}" viewBox="0 0 ${W} ${totalH}">
+  <rect x="0" y="0" width="${W}" height="${totalH}" fill="${BG}"/>`);
+
+  out.push(textLines(PAD, y+22, procLines, {size:24,weight:600,fill:FG,line:20})); y += procLines.length*20 + 8;
+  out.push(textLines(PAD, y+16, subLines, {size:13,weight:400,fill:MUTED,line:18})); y += subLines.length*18 + 10;
+
+  let prevX = PAD + (COLW/2), prevY = y;
+  nodes.forEach((n, idx)=>{
+    if (n.kind==='start' || n.kind==='end'){
+      const nx = PAD + (COLW - n.w)/2, ny=y;
+      out.push(rect(nx, ny, n.w, n.h, 20, ACCENT, ACCENT));
+      out.push(`<text x="${nx+n.w/2}" y="${ny+n.h/2+5}" text-anchor="middle" font-family="Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial" font-size="14px" font-weight="700" fill="#fff">${esc(n.title)}</text>`);
+      if (idx>0) out.push(`<line x1="${prevX}" y1="${prevY}" x2="${PAD+COLW/2}" y2="${ny}" stroke="${ACCENT}" stroke-width="2" />`);
+      y += n.h + 24; prevX = PAD+COLW/2; prevY = ny+n.h; return;
+    }
+    const nx=PAD, ny=y;
+    out.push(rect(nx, ny, n.w, n.h, BOXR, PANEL, BORDER));
+    const innerX=nx+16, innerY0=ny+16;
+    out.push(textLines(innerX, innerY0+18, n.titleLines, {size:18,weight:700,fill:ACCENT,line:20}));
+    let yy = innerY0 + n.titleLines.length*20 + 8;
+    n.items.forEach(it=>{
+      const color = it.type==='group-item' ? MUTED : FG;
+      const lines = it._lines && it._lines.length ? it._lines : [''];
+      out.push(textLines(innerX, yy+16, lines, {size:14,weight:400,fill:color,line:20}));
+      yy += lines.length*20 + (it.type==='spacer'?8:0);
+    });
+    out.push(`<line x1="${prevX}" y1="${prevY}" x2="${PAD+COLW/2}" y2="${ny}" stroke="${ACCENT}" stroke-width="2" />`);
+    y += n.h + 24; prevX = PAD+COLW/2; prevY = ny+n.h;
+  });
+
+  out.push(`</svg>`);
+  return out.join('\n');
+}
+</script>
+
+<!-- =========================
+     PARTIE 3/3 — BINDINGS & BOOT
+     ========================= -->
+<script>
+function createSection(){
+  const p=P(); if (!p) return;
+  p.sections.push(makeSection());
+  editingGroupIndex=-1; editingFieldIndex=-1;
+  save(); renderAll(); selectSection(p.sections.length-1);
+  toast('Partie ajoutée');
+}
+
 function bindFieldInputsLive(){
   const map = {
     '#fldName': (el, f)=>{
       const label = el.value || '';
-      f.label = label;
-      $('#fldLabel').value = label;
-      if (f.nameAuto !== false){
-        const base = tinyName(label || 'champ');
-        f.name = uniqueName(base);
-      }
+      f.label = label; $('#fldLabel').value = label;
+      if (f.nameAuto !== false){ f.name = uniqueName(tinyName(label || 'champ')); }
     },
     '#fldLabel': (el, f)=>{
       const label = el.value || '';
-      f.label = label;
-      $('#fldName').value = label;
-      if (f.nameAuto !== false){
-        const base = tinyName(label || 'champ');
-        f.name = uniqueName(base);
-      }
+      f.label = label; $('#fldName').value = label;
+      if (f.nameAuto !== false){ f.name = uniqueName(tinyName(label || 'champ')); }
     },
-    '#fldType': (el, f)=>{ f.type = el.value; if(!isOptType(f.type)) f.options = []; updateOptionsVisibility(); },
+    '#fldType': (el, f)=>{ f.type = el.value; if(!isOptType(f.type)) f.options=[]; updateOptionsVisibility(); },
     '#fldRequired': (el, f)=>{ f.required = (el.value==='true'); },
     '#fldRepeatable':(el, f)=>{ f.repeatable = (el.value==='true'); },
     '#fldOptions':   (el, f)=>{ f.options = el.value.split(',').map(s=>s.trim()).filter(Boolean); },
-    // Tips
-    '#fldTipsIcon': (el, f)=>{ f.tips = f.tips || {icon:'',text:''}; f.tips.icon = el.value; updateTipsPreview(f); },
-    '#fldTips':     (el, f)=>{ f.tips = f.tips || {icon:'',text:''}; f.tips.text = el.value; updateTipsPreview(f); }
+    '#fldTipsIcon':  (el, f)=>{ f.tips = f.tips || {icon:'',text:''}; f.tips.icon = el.value; updateTipsPreview(f); },
+    '#fldTips':      (el, f)=>{ f.tips = f.tips || {icon:'',text:''}; f.tips.text = el.value; updateTipsPreview(f); }
   };
-
   Object.entries(map).forEach(([sel, apply])=>{
     const el = document.querySelector(sel); if (!el) return;
     const evt = (sel==='#fldType' || sel==='#fldRequired' || sel==='#fldRepeatable') ? 'change' : 'input';
@@ -1455,10 +1437,10 @@ function bindFieldInputsLive(){
       let f;
       if (editingGroupIndex>=0 && isGroup(sec.fields?.[editingGroupIndex])){
         const g = sec.fields[editingGroupIndex];
-        if (editingFieldIndex < 0){ (g.fields||(g.fields=[])).push(makeField()); editingFieldIndex = g.fields.length - 1; }
+        if (editingFieldIndex < 0){ (g.fields||(g.fields=[])).push(makeField()); editingFieldIndex=g.fields.length-1; }
         f = g.fields[editingFieldIndex];
       } else {
-        if (editingFieldIndex < 0){ (sec.fields||(sec.fields=[])).push(makeField()); editingFieldIndex = sec.fields.length - 1; }
+        if (editingFieldIndex < 0){ (sec.fields||(sec.fields=[])).push(makeField()); editingFieldIndex=sec.fields.length-1; }
         f = sec.fields[editingFieldIndex];
       }
       apply(el, f);
@@ -1466,7 +1448,6 @@ function bindFieldInputsLive(){
     });
   });
 
-  // Groupes
   const groupMap = {
     '#grpLabel': (el, g)=>{
       g.label = el.value;
@@ -1499,46 +1480,70 @@ function bindFieldInputsLive(){
   $('#btnDeleteGroup').addEventListener('click', ()=>{
     if (currentSection<0 || editingGroupIndex<0) return;
     S()[currentSection].fields.splice(editingGroupIndex,1);
-    editingGroupIndex = -1;
+    editingGroupIndex=-1;
     save(); renderAll(); selectSection(currentSection);
   });
 }
 
-/* --- Icon picker setup --- */
-const ICONS = ["💡","ℹ️","📌","📎","✅","⚠️","🚫","📝","🧠","🧩","🔗","📂","📄","📣","🕒","🧪","💬","🧷","🔍","📷","🖇️","📦","🗂️","🧭","📚","🧾","🧯","🎯","🛠️","🧱","🪪","🧷","💾","🧑‍🏫","🏷️","🪄","💭","🚀"];
 function buildIconPicker(){
-  const grid = $('#iconGrid'); if (!grid) return;
-  grid.innerHTML = '';
+  const ICONS = ["💡","ℹ️","📌","📎","✅","⚠️","🚫","📝","🧠","🧩","🔗","📂","📄","📣","🕒","🧪","💬","🧷","🔍","📷","🖇️","📦","🗂️","🧭","📚","🧾","🧯","🎯","🛠️","🧱","🪪","🧷","💾","🧑‍🏫","🏷️","🪄","💭","🚀"];
+  const grid = $('#iconGrid'); if (!grid) return; grid.innerHTML='';
   ICONS.forEach(ic=>{
-    const b = document.createElement('button');
-    b.type = 'button'; b.textContent = ic;
-    b.addEventListener('click', ()=>{
-      const inp = $('#fldTipsIcon');
-      inp.value = ic; inp.dispatchEvent(new Event('input', {bubbles:true}));
-      grid.classList.add('hidden');
-    });
+    const b = document.createElement('button'); b.type='button'; b.textContent=ic;
+    b.addEventListener('click', ()=>{ const inp=$('#fldTipsIcon'); inp.value=ic; inp.dispatchEvent(new Event('input',{bubbles:true})); grid.classList.add('hidden'); });
     grid.appendChild(b);
   });
-  const dl = $('#iconDatalist');
-  if (dl){ dl.innerHTML = ICONS.map(i=>`<option value="${i}">`).join(''); }
-  $('#btnToggleIconPicker')?.addEventListener('click', ()=>{
-    grid.classList.toggle('hidden');
-  });
-  document.addEventListener('click', (e)=>{
-    if (!grid.contains(e.target) && e.target !== $('#btnToggleIconPicker')){
-      grid.classList.add('hidden');
-    }
-  });
+  const dl = $('#iconDatalist'); if (dl){ dl.innerHTML = ICONS.map(i=>`<option value="${i}">`).join(''); }
+  $('#btnToggleIconPicker')?.addEventListener('click', ()=> grid.classList.toggle('hidden'));
+  document.addEventListener('click',(e)=>{ if (!grid.contains(e.target) && e.target !== $('#btnToggleIconPicker')) grid.classList.add('hidden'); });
 }
 
-/* --- Global render --- */
-function renderAll(){ renderProcesses(); renderSections(); renderPreview(); }
+function ensureGroupUids(){
+  PROCESSES.forEach(p=> (p.sections||[]).forEach(sec=> (sec.fields||[]).forEach(it=>{ if (isGroup(it) && !it.__uid) it.__uid = genUid(); })));
+}
 
-/* --- Bind global --- */
+/* ZIP util (zip.js) — export UML uniquement en SVG (pas de PNG, pas de canvas) */
+async function makeZipAES(files, password){
+  if (!window.zip) throw new Error('zip.js introuvable');
+  const writer = new zip.ZipWriter(new zip.BlobWriter('application/zip'), {
+    password, encryptionStrength: 3, zipCrypto: false, level: 0
+  });
+  for (const f of files){
+    await writer.add(f.name, new zip.Uint8ArrayReader(f.data), { lastModDate: f.date || new Date() });
+  }
+  return await writer.close();
+}
+function strToU8(s){ return new TextEncoder().encode(s); }
+function safeName(s){ return String(s||'processus').replace(/[^\p{L}\p{N}\-_.]+/gu,'_'); }
+
+async function exportAllUmlZIP(){
+  const procs = PROCESSES.filter(p=>p.enabled!==false);
+  if (!procs.length){ alert('Aucun processus activé'); return; }
+  const pwd = await promptPassword('Schéma UML (ZIP protégé)', 'Choisissez un mot de passe pour le ZIP.');
+  if (!pwd) return;
+
+  const files = [];
+  for (const p of procs){
+    const svg = generateUmlSVGFor(p);
+    const base = safeName(p.name||'processus');
+    const svgU8 = strToU8(svg);
+    files.push({ name: `${base}.uml.svg`, data: svgU8, date:new Date() });
+  }
+  let zipBlob;
+  try{ zipBlob = await makeZipAES(files, pwd); }
+  catch(e){ console.warn('zip.js indisponible', e); alert("Impossible de créer un ZIP protégé (zip.js)"); return; }
+  const zipUrl = URL.createObjectURL(zipBlob);
+  const name = `uml_exports_${new Date().toISOString().replace(/[:.]/g,'-')}.zip`;
+  const a = document.createElement('a'); a.href = zipUrl; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(zipUrl);
+  toast('ZIP UML exporté (protégé) ✅');
+}
+
+/* Bind global */
 function bindGlobal(){
   $('#btnNewProcess').addEventListener('click', ()=>{
     PROCESSES.push(makeProcess());
-    currentProcess = PROCESSES.length-1; currentSection=-1;
+    currentProcess=PROCESSES.length-1; currentSection=-1;
     save(); renderAll(); selectProcess(currentProcess); toast('Processus ajouté');
   });
   $('#fabAdd').addEventListener('click', ()=> $('#btnNewProcess').click());
@@ -1546,7 +1551,7 @@ function bindGlobal(){
 
   $('#btnDeleteSection').addEventListener('click', ()=>{
     if (currentSection<0) return;
-    const sections = S();
+    const sections=S();
     if (!confirm('Supprimer cette partie et tous ses items ?')) return;
     sections.splice(currentSection,1);
     save(); renderAll(); selectSection(-1); toast('Partie supprimée');
@@ -1554,113 +1559,89 @@ function bindGlobal(){
 
   $('#btnFieldUp').addEventListener('click', ()=>{
     if (currentSection<0) return;
-    const sec = S()[currentSection];
+    const sec=S()[currentSection];
     if (editingGroupIndex>=0 && editingFieldIndex>=0 && isGroup(sec.fields[editingGroupIndex])){
-      const arr = sec.fields[editingGroupIndex].fields; const i = editingFieldIndex;
+      const arr=sec.fields[editingGroupIndex].fields; const i=editingFieldIndex;
       if (i>0){ const [m]=arr.splice(i,1); arr.splice(i-1,0,m); editingFieldIndex=i-1; save(); renderFields(sec.fields); renderPreview(); }
       return;
     }
     if (editingFieldIndex<0) return;
-    const arr = sec.fields; const i = editingFieldIndex;
+    const arr=sec.fields; const i=editingFieldIndex;
     if (i>0){ const [m]=arr.splice(i,1); arr.splice(i-1,0,m); editingFieldIndex=i-1; save(); renderFields(arr); renderPreview(); }
   });
 
   $('#btnFieldDown').addEventListener('click', ()=>{
     if (currentSection<0) return;
-    const sec = S()[currentSection];
+    const sec=S()[currentSection];
     if (editingGroupIndex>=0 && editingFieldIndex>=0 && isGroup(sec.fields[editingGroupIndex])){
-      const arr = sec.fields[editingGroupIndex].fields; const i = editingFieldIndex;
-      if (i < arr.length-1){ const [m]=arr.splice(i,1); arr.splice(i+1,0,m); editingFieldIndex=i+1; save(); renderFields(sec.fields); renderPreview(); }
+      const arr=sec.fields[editingGroupIndex].fields; const i=editingFieldIndex;
+      if (i<arr.length-1){ const [m]=arr.splice(i,1); arr.splice(i+1,0,m); editingFieldIndex=i+1; save(); renderFields(sec.fields); renderPreview(); }
       return;
     }
     if (editingFieldIndex<0) return;
-    const arr = sec.fields; const i = editingFieldIndex;
-    if (i < arr.length-1){ const [m]=arr.splice(i,1); arr.splice(i+1,0,m); editingFieldIndex=i+1; save(); renderFields(arr); renderPreview(); }
+    const arr=sec.fields; const i=editingFieldIndex;
+    if (i<arr.length-1){ const [m]=arr.splice(i,1); arr.splice(i+1,0,m); editingFieldIndex=i+1; save(); renderFields(arr); renderPreview(); }
   });
 
-  // (REMPLACE) Export JSON -> chiffré AES-GCM
+  // Export JSON -> chiffré AES-GCM
   $('#btnExport').addEventListener('click', async ()=>{
     const pwd = await promptPassword('Exporter JSON (protégé)', "Entrez un mot de passe pour chiffrer l'export.");
     if (!pwd) return;
-    const clean = getCleanModel();
-    const payload = await aesGcmEncryptFromString(pwd, JSON.stringify(clean, null, 2));
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'template.processes.enc.json';
+    const clean=getCleanModel();
+    const payload=await aesGcmEncryptFromString(pwd, JSON.stringify(clean,null,2));
+    const blob=new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='template.processes.enc.json';
     document.body.appendChild(a); a.click(); URL.revokeObjectURL(a.href); a.remove();
     toast('JSON chiffré exporté ✅');
   });
 
-  // (REMPLACE) Copie en clair avec avertissement explicite
+  // Copie en clair
   $('#btnCopy').addEventListener('click', async ()=>{
-    const ok = await confirmWarning(
-      'Copier le JSON en clair',
-      "Vous allez copier le modèle en clair dans le presse-papiers. Évitez de le coller dans des outils non sûrs.",
-      'Copier quand même'
-    );
+    const ok = await confirmWarning('Copier le JSON en clair',"Vous allez copier le modèle en clair dans le presse-papiers. Évitez de le coller dans des outils non sûrs.",'Copier quand même');
     if (!ok) return;
-    const clean = getCleanModel();
-    await navigator.clipboard.writeText(JSON.stringify(clean, null, 2));
-    toast('JSON copié (en clair) ✅');
+    try{
+      const clean=getCleanModel();
+      await navigator.clipboard.writeText(JSON.stringify(clean,null,2));
+      toast('JSON copié (en clair) ✅');
+    }catch(e){ alert("Impossible de copier dans le presse-papiers."); }
   });
 
-  // (REMPLACE) Import JSON -> détecte chiffrage et demande le mot de passe
+  // Import JSON (détecte chiffrage)
   $('#fileImport').addEventListener('change', async (e)=>{
-    const f = e.target.files?.[0]; if (!f) return;
+    const f=e.target.files?.[0]; if (!f) return;
     try{
-      const txt = await f.text();
-      let json = JSON.parse(txt);
-
-      // Détection enveloppe chiffrée
-      if (json && json.format === 'IF-AESGCM-v1' && json.ct && json.iv && json.salt){
-        const pwd = await promptPassword('Importer JSON (protégé)', 'Saisissez le mot de passe du fichier.');
+      const txt=await f.text(); let json=JSON.parse(txt);
+      if (json && json.format==='IF-AESGCM-v1' && json.ct && json.iv && json.salt){
+        const pwd = await promptPassword('Importer JSON (protégé)','Saisissez le mot de passe du fichier.');
         if (!pwd) throw new Error('Import annulé');
-        const plain = await aesGcmDecryptToString(pwd, json);
+        let plain;
+        try{ plain = await aesGcmDecryptToString(pwd, json); }
+        catch(_){ throw new Error('Mot de passe incorrect ou fichier corrompu'); }
         json = JSON.parse(plain);
       }
-
-      // Compat legacy: si root = sections[] -> wrap en processus
       if (Array.isArray(json) && json.length && !('sections' in (json[0]||{})) && ('title' in (json[0]||{}))){
         json = [{ name:'Processus 1', enabled:true, sections: json }];
       }
-
-      const ok = validateTemplate(json);
+      const ok=validateTemplate(json);
       if (!ok.valid) throw new Error('Modèle invalide : ' + ok.reason);
 
       PROCESSES = json.map(p=>({
         name: p.name || 'Processus',
         enabled: (p.enabled!==false),
         sections: (p.sections||[]).map(sec=>{
-          const s = { title: sec.title || '', fields: [] };
+          const s={ title: sec.title || '', fields: [] };
           s.fields = (sec.fields||[]).map(it=>{
             if (it.group){
-              const g = {
-                __kind:'group',
-                __uid: genUid(),
-                name: it.group.name || tinyName(it.group.label || 'groupe'),
-                label: it.group.label || '',
-                required: !!it.group.required,
-                repeatable: !!it.group.repeatable,
-                nameAuto: false,
-                fields: (it.fields||[]).map(f=>{
-                  const ff = { __kind:'field', ...f, nameAuto:false };
-                  if (!ff.name) ff.name = tinyName(ff.label || ff.name || 'champ');
-                  if (!ff.tips) ff.tips = { icon:'', text:'' };
-                  return ff;
-                })
-              };
+              const g = { __kind:'group', __uid:genUid(), name:it.group.name || tinyName(it.group.label || 'groupe'), label:it.group.label||'', required:!!it.group.required, repeatable:!!it.group.repeatable, nameAuto:false,
+                fields:(it.fields||[]).map(f=>{ const ff={__kind:'field',...f,nameAuto:false}; if(!ff.name) ff.name=tinyName(ff.label||ff.name||'champ'); if(!ff.tips) ff.tips={icon:'',text:''}; return ff; }) };
               return g;
             }
-            const f2 = { __kind:'field', ...it, nameAuto:false };
-            if (!f2.name) f2.name = tinyName(f2.label || f2.name || 'champ');
-            if (!f2.tips) f2.tips = { icon:'', text:'' };
-            return f2;
+            const f2={__kind:'field', ...it, nameAuto:false}; if(!f2.name) f2.name=tinyName(f2.label||f2.name||'champ'); if(!f2.tips) f2.tips={icon:'',text:''}; return f2;
           });
           return s;
         })
       }));
-      currentProcess = 0; currentSection = PROCESSES[0]?.sections?.length ? 0 : -1;
+      currentProcess=0; currentSection=PROCESSES[0]?.sections?.length ? 0 : -1;
       save(); renderAll(); selectProcess(currentProcess); if (currentSection>=0) selectSection(currentSection);
       toast('Modèle importé');
     }catch(err){ alert('Import échoué : ' + (err?.message || err)); }
@@ -1670,17 +1651,14 @@ function bindGlobal(){
   $('#btnAddGroup').addEventListener('click', ()=>{
     if (currentSection<0) createSection();
     const sec = S()[currentSection];
-    const arr = sec.fields || (sec.fields=[]);
-    const g = makeGroup(); g.label = ''; g.name = uniqueName(tinyName('groupe'));
+    const arr = sec.fields || (sec.fields = []); // <-- corrige la syntaxe cassée
+    const g = makeGroup(); g.label=''; g.name = uniqueName(tinyName('groupe'));
     arr.push(g);
-    save(); renderAll(); selectSection(currentSection);
-    toast('Groupe ajouté');
+    save(); renderAll(); selectSection(currentSection); toast('Groupe ajouté');
   });
 
   $('#btnGroupSelected')?.addEventListener('click', groupSelected);
-  
   $('#btnUmlZip')?.addEventListener('click', exportAllUmlZIP);
-
 
   $('#btnAddFieldInGroup').addEventListener('click', ()=>{
     if (currentSection<0 || editingGroupIndex<0) return;
@@ -1695,7 +1673,7 @@ function bindGlobal(){
 
   // Protéger les checkboxes des clics de carte
   (function protectCheckboxes(){
-    const area = document.getElementById('fieldList'); if (!area) return;
+    const area = $('#fieldList'); if (!area) return;
     const stop = e => { if (e.target && e.target.matches('input[type="checkbox"]')) e.stopPropagation(); };
     area.addEventListener('mousedown', stop, true);
     area.addEventListener('click', stop, true);
@@ -1704,288 +1682,19 @@ function bindGlobal(){
   buildIconPicker();
 }
 
-/* --- Assure UID + tips --- */
-function ensureGroupUids(){
-  PROCESSES.forEach(p=>{
-    (p.sections||[]).forEach(sec=>{
-      (sec.fields||[]).forEach(it=>{
-        if (isGroup(it) && !it.__uid) it.__uid = genUid();
-      });
-    });
-  });
-}
-
-/* === Export UML: ZIP (SVG + PNG par process) — sans dépendance === */
-
-/* Utilitaire: nom de fichier safe */
-function safeName(s){ return String(s||'processus').replace(/[^\p{L}\p{N}\-_.]+/gu,'_'); }
-
-/* Refactor: version “pour un process donné” */
-function generateUmlSVGFor(proc){
-  if (!proc) return '';
-  const sections = (proc.sections||[]);
-  // couleurs (reprend CSS vars)
-  const css = getComputedStyle(document.documentElement);
-  const W = 1200, PAD = 24, COLW = W - PAD*2, BOXR = 12;
-  const BG = css.getPropertyValue('--bg') || '#f6f7fb';
-  const FG = css.getPropertyValue('--fg') || '#111827';
-  const PANEL = css.getPropertyValue('--panel') || '#ffffff';
-  const BORDER = css.getPropertyValue('--card-border') || '#e5e7eb';
-  const ACCENT = css.getPropertyValue('--accent') || '#2563eb';
-  const MUTED = css.getPropertyValue('--muted') || '#6b7280';
-
-  const meas = document.createElement('canvas'); const m = meas.getContext('2d');
-  const F_PROC = '600 24px Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial';
-  const F_SEC  = '700 18px Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial';
-  const F_TXT  = '14px Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial';
-  const LINE   = 20;
-
-  const wrap=(t,max,f)=>{ m.font=f; const w=String(t||'').split(/\s+/); const out=[]; let cur=''; 
-    for(const word of w){ const test=cur?cur+' '+word:word; if(m.measureText(test).width<=max) cur=test; else{ if(cur) out.push(cur); cur=word; } } 
-    if(cur) out.push(cur); return out.length?out:['']; };
-  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-  // nodes
-  const nodes = [{ kind:'start', title:'Start', w:260, h:40 }];
-  sections.forEach((sec, si)=>{
-    const contentW = COLW - 32;
-    const titleLines = wrap(sec.title || '(section)', contentW, F_SEC);
-    let innerH = titleLines.length*LINE + 8;
-    const items=[];
-    (sec.fields||[]).forEach(it=>{
-      if (isGroup(it)){
-        const head = `Groupe: ${it.label || it.name || '(groupe)'}  • req:${!!it.required} • rep:${!!it.repeatable}`;
-        items.push({t:head, type:'group-head'});
-        (it.fields||[]).forEach(f=>{
-          const opts=(isOptType(f.type)&&Array.isArray(f.options)&&f.options.length)?` [${f.options.join(', ')}]`:'';
-          const tip =(f.tips&&f.tips.text&&f.tips.text.trim())?' • 💡':'';
-          items.push({t:`• ${f.label || f.name || '(champ)'} (${f.type}) • req:${!!f.required} • rep:${!!f.repeatable}${opts}${tip}`, type:'group-item'});
-        });
-        items.push({t:'',type:'spacer'});
-      }else{
-        const f=it;
-        const opts=(isOptType(f.type)&&Array.isArray(f.options)&&f.options.length)?` [${f.options.join(', ')}]`:'';
-        const tip =(f.tips&&f.tips.text&&f.tips.text.trim())?' • 💡':'';
-        items.push({t:`• ${f.label || f.name || '(champ)'} (${f.type}) • req:${!!f.required} • rep:${!!f.repeatable}${opts}${tip}`, type:'field'});
-      }
-    });
-    items.forEach(l=>{ const ls=wrap(l.t, contentW, F_TXT); l._lines=ls; innerH += (ls.length||1)*LINE + (l.type==='spacer'?8:0); });
-    nodes.push({ kind:'section', titleLines, items, w:COLW, h:innerH+32, index:si });
-  });
-  nodes.push({ kind:'end', title:'End', w:260, h:40 });
-
-  // mesure en-tête
-  const procLines = wrap(proc.name || '(processus)', COLW, F_PROC);
-  const subtitle = `${sections.length} partie(s) • export: ${new Date().toLocaleString()}`;
-  const subLines = wrap(subtitle, COLW, 'italic 13px Inter,system-ui');
-  const headerH = procLines.length*LINE + 8 + subLines.length*LINE + 10;
-
-  // hauteur totale
-  const GAP=24; let nodesSum=0; nodes.forEach(n=>nodesSum+=n.h+GAP); nodesSum-=GAP;
-  const totalH = PAD + headerH + nodesSum + PAD;
-
-  // helpers svg
-  const rect=(x,y,w,h,r,fill,stroke)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="${fill}" stroke="${stroke}" filter="url(#cardShadow)"/>`;
-  const textLines=(x, yTop, lines, font, fill)=>{ let out='', ycur=yTop; for(const ln of lines){ out+=`<text x="${x}" y="${ycur}" font="${font}" fill="${fill}">${esc(ln)}</text>`; ycur+=LINE; } return out; };
-
-  // build svg
-  let y=PAD, out=[];
-  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${totalH}" viewBox="0 0 ${W} ${totalH}">
-  <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="${ACCENT.trim()||'#2563eb'}"></path>
-    </marker>
-    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.08"/>
-    </filter>
-  </defs>
-  <rect x="0" y="0" width="${W}" height="${totalH}" fill="${(BG||'#f6f7fb').trim()}"/>`);
-
-  out.push(textLines(PAD, y+22, procLines, F_PROC, (FG||'#111827').trim())); y += procLines.length*LINE + 8;
-  out.push(textLines(PAD, y+16, subLines, 'italic 13px Inter,system-ui', (MUTED||'#6b7280').trim())); y += subLines.length*LINE + 10;
-
-  let prevX = PAD + COLW/2, prevY = y;
-  nodes.forEach((n, idx)=>{
-    if (n.kind==='start' || n.kind==='end'){
-      const nx = PAD + (COLW - n.w)/2, ny=y;
-      out.push(rect(nx, ny, n.w, n.h, 20, (ACCENT||'#2563eb').trim(), (ACCENT||'#2563eb').trim()));
-      out.push(`<text x="${nx+n.w/2}" y="${ny+n.h/2+5}" text-anchor="middle" font="700 14px Inter,system-ui" fill="#fff">${n.title}</text>`);
-      if (idx>0) out.push(`<line x1="${prevX}" y1="${prevY}" x2="${PAD+COLW/2}" y2="${ny}" stroke="${(ACCENT||'#2563eb').trim()}" stroke-width="2" marker-end="url(#arrow)"/>`);
-      y += n.h + GAP; prevX = PAD+COLW/2; prevY = ny+n.h; return;
-    }
-    const nx=PAD, ny=y; out.push(rect(nx, ny, n.w, n.h, BOXR, (PANEL||'#fff').trim(), (BORDER||'#e5e7eb').trim()));
-    const innerX = nx+16, innerY0 = ny+16;
-    out.push(textLines(innerX, innerY0+18, n.titleLines, F_SEC, (ACCENT||'#2563eb').trim()));
-    let yy = innerY0 + n.titleLines.length*LINE + 8;
-    n.items.forEach(it=>{
-      const color = it.type==='group-item' ? (MUTED||'#6b7280').trim() : (FG||'#111827').trim();
-      const lines = it._lines && it._lines.length ? it._lines : [''];
-      out.push(textLines(innerX, yy+16, lines, F_TXT, color));
-      yy += lines.length*LINE + (it.type==='spacer'?8:0);
-    });
-    out.push(`<line x1="${prevX}" y1="${prevY}" x2="${PAD+COLW/2}" y2="${ny}" stroke="${(ACCENT||'#2563eb').trim()}" stroke-width="2" marker-end="url(#arrow)"/>`);
-    y += n.h + GAP; prevX = PAD+COLW/2; prevY = ny+n.h;
-  });
-
-  out.push(`</svg>`);
-  return out.join('\n');
-}
-
-/* Convertit SVG texte -> PNG Blob */
-function svgTextToPngBlob(svgText){
-  return new Promise((resolve, reject)=>{
-    const img = new Image();
-    const url = URL.createObjectURL(new Blob([svgText], {type:'image/svg+xml'}));
-    img.onload = ()=>{
-      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
-      const ctx = c.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,c.width,c.height); ctx.drawImage(img,0,0);
-      URL.revokeObjectURL(url);
-      c.toBlob(b=> b?resolve(b):reject(new Error('PNG fail')), 'image/png', 1);
-    };
-    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('SVG load fail')); };
-    img.src = url;
-  });
-}
-
-/* === Mini ZIP (store only) — CRC32 + headers === */
-const CRC32_TABLE = (()=>{ let c, t=new Uint32Array(256); for(let n=0;n<256;n++){ c=n; for(let k=0;k<8;k++){ c = (c&1)? (0xEDB88320 ^ (c>>>1)) : (c>>>1); } t[n]=c>>>0; } return t; })();
-function crc32(u8){ let c=~0>>>0; for(let i=0;i<u8.length;i++){ c = CRC32_TABLE[(c^u8[i])&0xFF] ^ (c>>>8); } return (~c)>>>0; }
-function dosDateTime(d=new Date()){
-  const dt = new Date(d);
-  const year = Math.max(1980, dt.getFullYear());
-  const dosDate = ((year-1980)<<9) | ((dt.getMonth()+1)<<5) | dt.getDate();
-  const dosTime = (dt.getHours()<<11) | (dt.getMinutes()<<5) | Math.floor(dt.getSeconds()/2);
-  return {dosDate, dosTime};
-}
-function strToU8(s){ return new TextEncoder().encode(s); }
-function u32le(n){ return new Uint8Array([n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255]); }
-function u16le(n){ return new Uint8Array([n&255,(n>>>8)&255]); }
-
-async function makeZip(files){ // files: [{name, data: Uint8Array, date?:Date}]
-  // concat helper
-  const chunks=[]; let offset=0;
-  const central=[]; let centralSize=0;
-  const push=(u8)=>{ chunks.push(u8); offset+=u8.length; };
-  for(const f of files){
-    const nameU8 = strToU8(f.name);
-    const dataU8 = f.data;
-    const {dosDate,dosTime} = dosDateTime(f.date);
-    const crc = crc32(dataU8);
-    const localHeader = new Uint8Array([
-      ...u32le(0x04034b50), ...u16le(20), ...u16le(0), ...u16le(0), ...u16le(dosTime), ...u16le(dosDate),
-      ...u32le(crc), ...u32le(dataU8.length), ...u32le(dataU8.length),
-      ...u16le(nameU8.length), ...u16le(0)
-    ]);
-    push(localHeader); push(nameU8); push(dataU8);
-    // central dir entry
-    const centralHeader = new Uint8Array([
-      ...u32le(0x02014b50), ...u16le(20), ...u16le(20), ...u16le(0), ...u16le(0), ...u16le(dosTime), ...u16le(dosDate),
-      ...u32le(crc), ...u32le(dataU8.length), ...u32le(dataU8.length),
-      ...u16le(nameU8.length), ...u16le(0), ...u16le(0),
-      ...u16le(0), ...u16le(0), ...u32le(0), ...u32le(offset - (localHeader.length + nameU8.length + dataU8.length))
-    ]);
-    central.push(centralHeader, nameU8);
-    centralSize += centralHeader.length + nameU8.length;
-  }
-  const centralStart = offset;
-  for(const part of central) push(part);
-  const end = new Uint8Array([
-    ...u32le(0x06054b50), ...u16le(0), ...u16le(0),
-    ...u16le(files.length), ...u16le(files.length),
-    ...u32le(centralSize), ...u32le(centralStart),
-    ...u16le(0)
-  ]);
-  push(end);
-  // merge chunks into one Uint8Array and Blob
-  let total=0; chunks.forEach(c=>total+=c.length);
-  const out = new Uint8Array(total); let p=0; for(const c of chunks){ out.set(c,p); p+=c.length; }
-  return new Blob([out], {type:'application/zip'});
-}
-
-// (AJOUT) ZIP AES (7-Zip/WinZip) avec zip.js
-async function makeZipAES(files, password){
-  if (!window.zip) throw new Error('zip.js introuvable');
-  const writer = new zip.ZipWriter(new zip.BlobWriter('application/zip'), {
-    password,               // active AES
-    encryptionStrength: 3,  // AES-256
-    zipCrypto: false,       // pas de PKZip legacy
-    level: 0                // pas de compression (plus rapide, optionnel)
-  });
-  for (const f of files){
-    await writer.add(
-      f.name,
-      new zip.Uint8ArrayReader(f.data),
-      { lastModDate: f.date || new Date() }
-    );
-  }
-  return await writer.close();
-}
-
-/* Build ZIP de tous les processus activés */
-/* (REMPLACE) Build ZIP UML protégé AES */
-async function exportAllUmlZIP(){
-  const procs = PROCESSES.filter(p=>p.enabled!==false);
-  if (!procs.length){ alert('Aucun processus activé'); return; }
-
-  const pwd = await promptPassword('Schéma UML (ZIP protégé)', 'Choisissez un mot de passe pour le ZIP.');
-  if (!pwd) return;
-
-  const files = [];
-  for (const p of procs){
-    const svg = generateUmlSVGFor(p);
-    const base = safeName(p.name||'processus');
-    // SVG
-    const svgU8 = strToU8(svg);
-    files.push({ name: `${base}.uml.svg`, data: svgU8, date:new Date() });
-    // PNG
-    const pngBlob = await svgTextToPngBlob(svg);
-    const buf = new Uint8Array(await pngBlob.arrayBuffer());
-    files.push({ name: `${base}.uml.png`, data: buf, date:new Date() });
-  }
-
-  let zipBlob;
-  try{
-    zipBlob = await makeZipAES(files, pwd);    // << chiffrage AES
-  }catch(e){
-    // Fallback (non chiffré) si zip.js indispo
-    console.warn('zip.js indisponible, fallback non chiffré', e);
-    zipBlob = await makeZip(files);            // << store only (non protégé)
-  }
-  const zipUrl = URL.createObjectURL(zipBlob);
-  const name = `uml_exports_${new Date().toISOString().replace(/[:.]/g,'-')}.zip`;
-  const a = document.createElement('a'); a.href = zipUrl; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(zipUrl);
-  toast('ZIP UML exporté (protégé) ✅');
-}
-
-/* --- Boot --- */
+/* Boot */
 function boot(){
   PROCESSES = load();
-  if (!Array.isArray(PROCESSES) || !PROCESSES.length){
-    PROCESSES = [ makeProcess() ];
-  }
-  // normalise
+  if (!Array.isArray(PROCESSES) || !PROCESSES.length) PROCESSES = [ makeProcess() ];
+
   PROCESSES.forEach(p=>{
     if (typeof p.enabled === 'undefined') p.enabled = true;
     if (!Array.isArray(p.sections)) p.sections = [];
     p.sections = p.sections.map(sec=>{
       sec.fields = (sec.fields||[]).map(it=>{
         if (it.group){
-          const g = {
-            __kind:'group',
-            __uid: it.__uid || genUid(),
-            name: (it.group.name||tinyName(it.group.label||'groupe')),
-            label: (it.group.label||''),
-            required: !!it.group.required,
-            repeatable: !!it.group.repeatable,
-            nameAuto: false,
-            fields: (it.fields||[]).map(f=>{
-              const ff = { __kind:'field', ...f, nameAuto:false };
-              if (!ff.name) ff.name = tinyName(ff.label || ff.name || 'champ');
-              if (!ff.tips) ff.tips = { icon:'', text:'' };
-              return ff;
-            })
-          };
+          const g = { __kind:'group', __uid: it.__uid || genUid(), name:(it.group.name||tinyName(it.group.label||'groupe')), label:(it.group.label||''), required:!!it.group.required, repeatable:!!it.group.repeatable, nameAuto:false,
+            fields:(it.fields||[]).map(f=>{ const ff={__kind:'field',...f,nameAuto:false}; if(!ff.name) ff.name=tinyName(ff.label||ff.name||'champ'); if(!ff.tips) ff.tips={icon:'',text:''}; return ff; }) };
           return g;
         }
         if (it.__kind==='group' || it.__kind==='field'){
@@ -2001,6 +1710,7 @@ function boot(){
       return sec;
     });
   });
+
   ensureGroupUids();
   if (currentProcess>=PROCESSES.length) currentProcess=0;
   renderAll();
@@ -2008,25 +1718,25 @@ function boot(){
   if (S().length) selectSection(0); else selectSection(-1);
   updateOptionsVisibility();
   bindFieldInputsLive();
+
+  // Ajuste la hauteur du header pour le layout plein écran
+  (function fitHeader(){
+    const set = ()=> {
+      const h = document.querySelector('header')?.offsetHeight || 64;
+      document.documentElement.style.setProperty('--header-h', h + 'px');
+    };
+    set();
+    window.addEventListener('resize', set);
+    window.addEventListener('load', set);
+  })();
 }
 
-/* --- Fit header height for full-height layout --- */
-(function fitHeader(){
-  const set = ()=> {
-    const h = document.querySelector('header')?.offsetHeight || 64;
-    document.documentElement.style.setProperty('--header-h', h + 'px');
-  };
-  set();
-  window.addEventListener('resize', set);
-  window.addEventListener('load', set);
-})();
-
-/* --- Init --- */
+/* Init */
 (function init(){
   bindGlobal();
   boot();
 })();
-
 </script>
+
 </body>
 </html>
