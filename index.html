@@ -253,15 +253,40 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
   border-radius:14px; box-shadow:var(--shadow); padding:16px;
 }
 .modal h3{ margin:0 0 8px; font-size:16px }
-.modal p{
-  margin:4px 0 10px;
-  color:var(--muted);
-  white-space:pre-line; /* ← permet d’afficher \n \n */
-}
+.modal p{ margin:4px 0 10px; color:var(--muted) }
 .modal .row{ display:flex; gap:8px; align-items:center }
 .modal .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:12px }
 .modal input[type="password"], .modal input[type="text"]{ width:100% }
 .modal-backdrop.show{ display:flex }
+
+/* Anti-overflow global pour les layouts flex/grid */
+* { box-sizing: border-box; min-width: 0 }
+
+/* Conteneur central fluide, évite l'étirement hors écran */
+.wrap{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:12px;
+  padding:12px;
+  width: min(1200px, 100%);
+  margin-inline: auto;
+}
+
+/* Empêche les éléments flex de forcer l'élargissement */
+.inline, .toolbar, header { min-width: 0 }
+
+/* Les panels ne débordent pas et peuvent scroller si besoin */
+.panel { overflow: hidden }
+
+/* Les listes prennent bien la largeur dispo sans pousser le grid */
+.list,.fields { min-width: 0 }
+
+/* Le header s’adapte mieux sur petits écrans */
+.toolbar{display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-start; min-width:0}
+
+/* Préservation de l’aperçu sans déborder horizontalement */
+.preview pre{ max-width:100%; overflow:auto }
+
 </style>
 </head>
 <body>
@@ -478,6 +503,8 @@ let currentSection = -1;
 let editingFieldIndex = -1;
 let editingGroupIndex = -1;
 
+const DND_MIME = 'application/x-json-item';
+
 const $  = (sel, root=document)=> root.querySelector(sel);
 const $$ = (sel, root=document)=> [...root.querySelectorAll(sel)];
 const save = ()=> localStorage.setItem('templateBuilderV2', JSON.stringify(PROCESSES));
@@ -605,6 +632,14 @@ function makeGroup(){ return { __kind:'group', __uid:genUid(), name:'', label:''
 function makeSection(){ return { title:'Nouvelle partie', fields:[] }; }
 function makeProcess(){ return { name:`Processus ${PROCESSES.length+1}`, enabled:true, sections:[] }; }
 
+function insertFieldInGroupByUid(gid, field, beforeIdx=null){
+  const { group } = findGroupByUid(gid);
+  if (!group) return;
+  const arr = group.fields || (group.fields = []);
+  const at = (beforeIdx==null || beforeIdx<0 || beforeIdx>arr.length) ? arr.length : beforeIdx;
+  arr.splice(at, 0, field);
+}
+
 /* --- Group helper --- */
 function findGroupByUid(uid){
   const arr = S()[currentSection]?.fields || [];
@@ -661,46 +696,93 @@ function openFieldEditor(f){
 
 /* --- Rendu processus --- */
 function renderProcesses(){
-  const list = $('#processList'); list.innerHTML = '';
-  PROCESSES.forEach((proc,i)=>{
+  const list = $('#processList');
+  list.innerHTML = '';
+
+  PROCESSES.forEach((proc, i) => {
     const item = document.createElement('div');
     item.className = 'proc-item' + (proc.enabled ? '' : ' disabled');
-    item.draggable = true; item.dataset.index = i;
+    item.draggable = true;
+    item.dataset.index = i;
+
     const actLabel = proc.enabled ? 'Désactiver' : 'Activer';
+
     item.innerHTML = `
       <div class="drag" title="Glisser pour réorganiser">⋮⋮</div>
       <div class="title">${proc.name || '(sans nom)'}</div>
-      <span class="pill">${(proc.sections||[]).length} partie(s)</span>
+      <span class="pill">${(proc.sections || []).length} partie(s)</span>
       <div class="right">
         <button class="btn" data-act="toggle">${actLabel}</button>
         <button class="btn" data-act="edit">Éditer</button>
         <button class="btn danger" data-act="del">Supprimer</button>
-      </div>`;
-    item.addEventListener('click',(e)=>{
+      </div>
+    `;
+
+    item.addEventListener('click', (e) => {
       const act = e.target.closest('button')?.dataset?.act || 'edit';
-      if (act==='edit'){ selectProcess(i); $('#processEditor')?.scrollIntoView({behavior:'smooth'}); }
-      else if (act==='toggle'){ PROCESSES[i].enabled = !PROCESSES[i].enabled; save(); renderAll(); renderPreview(); }
-      else if (act==='del'){
-        if (PROCESSES.length<=1) { toast('Au moins un processus est requis'); return; }
-        if (confirm('Supprimer ce processus ?')){ PROCESSES.splice(i,1); if (currentProcess>=PROCESSES.length) currentProcess=PROCESSES.length-1; currentSection=-1; save(); renderAll(); selectProcess(currentProcess); }
+      if (act === 'edit') {
+        selectProcess(i);
+        $('#processEditor')?.scrollIntoView({ behavior: 'smooth' });
+      } else if (act === 'toggle') {
+        PROCESSES[i].enabled = !PROCESSES[i].enabled;
+        save(); renderAll(); renderPreview();
+      } else if (act === 'del') {
+        if (PROCESSES.length <= 1) {
+          toast('Au moins un processus est requis');
+          return;
+        }
+        if (confirm('Supprimer ce processus ?')) {
+          PROCESSES.splice(i, 1);
+          if (currentProcess >= PROCESSES.length) currentProcess = PROCESSES.length - 1;
+          currentSection = -1;
+          save(); renderAll(); selectProcess(currentProcess);
+        }
       }
     });
-    item.addEventListener('dragstart',(e)=>{ item.classList.add('dragging'); e.dataTransfer.setData('text/plain', i); e.dataTransfer.effectAllowed='move'; });
-    item.addEventListener('dragend',()=> item.classList.remove('dragging'));
-    item.addEventListener('dragover',(e)=> e.preventDefault());
-    item.addEventListener('drop',(e)=>{
+
+    item.addEventListener('dragstart', (e) => {
+      item.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', i);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    item.addEventListener('dragend', () => item.classList.remove('dragging'));
+
+    item.addEventListener('dragover', (e) => {
+      const isReorder =
+        e.dataTransfer.types.includes('text/plain') &&
+        !e.dataTransfer.types.includes(DND_MIME);
+      if (!isReorder) return;
       e.preventDefault();
-      const from = +e.dataTransfer.getData('text/plain'); const to = i;
-      if (from===to) return;
-      const [m]=PROCESSES.splice(from,1); PROCESSES.splice(to,0,m);
+      e.stopPropagation();
+      item.classList.add('drop-target');
+    });
+
+    item.addEventListener('dragleave', (e) => {
+      e.stopPropagation();
+      item.classList.remove('drop-target');
+    });
+
+    item.addEventListener('drop', (e) => {
+      // Ne gérer ici QUE le réordonnancement (text/plain), pas les items
+      if (!e.dataTransfer.types.includes('text/plain') || e.dataTransfer.types.includes(DND_MIME)) return;
+      e.preventDefault();
+      const from = +e.dataTransfer.getData('text/plain');
+      const to = i;
+      if (!Number.isInteger(from) || from === to) return;
+      const [m] = PROCESSES.splice(from, 1);
+      PROCESSES.splice(to, 0, m);
       currentProcess = to;
       save(); renderAll(); selectProcess(currentProcess);
     });
-    if (i===currentProcess) item.style.outline='2px solid var(--accent-2)';
-    list.appendChild(item);
-  });
-}
 
+    if (i === currentProcess) item.style.outline = '2px solid var(--accent-2)';
+    list.appendChild(item);
+  }); 
+} 
+
+
+/* --- Rendu sections --- */
 /* --- Rendu sections --- */
 function renderSections(){
   const list = $('#sectionList'); list.innerHTML = '';
@@ -718,6 +800,7 @@ function renderSections(){
         <button class="btn" data-act="edit">Éditer</button>
         <button class="btn danger" data-act="del">Supprimer</button>
       </div>`;
+
     item.addEventListener('click',(e)=>{
       const act = e.target.closest('button')?.dataset?.act || 'edit';
       if (act==='edit'){ selectSection(i); }
@@ -725,16 +808,32 @@ function renderSections(){
       else if (act==='up'){ if(i>0){ const [m]=sections.splice(i,1); sections.splice(i-1,0,m); save(); renderAll(); selectSection(i-1); } }
       else if (act==='down'){ if(i<sections.length-1){ const [m]=sections.splice(i,1); sections.splice(i+1,0,m); save(); renderAll(); selectSection(i+1); } }
     });
+
     item.addEventListener('dragstart',(e)=>{ item.classList.add('dragging'); e.dataTransfer.setData('text/plain', i); e.dataTransfer.effectAllowed='move'; });
     item.addEventListener('dragend',()=> item.classList.remove('dragging'));
-    item.addEventListener('dragover',(e)=> e.preventDefault());
-    item.addEventListener('drop',(e)=>{
+
+    // Autoriser le drop d’items (field/group) AVANT cette section
+    item.addEventListener('dragover', (e) => {
+      const isReorder =
+        e.dataTransfer.types.includes('text/plain') &&
+        !e.dataTransfer.types.includes(DND_MIME);
+      if (!isReorder) return;
+      e.preventDefault();
+      e.stopPropagation();
+      item.classList.add('drop-target');
+    });
+
+    item.addEventListener('dragleave', (e)=>{ e.stopPropagation(); item.classList.remove('drop-target'); });
+    item.addEventListener('drop', (e)=>{
+      // Ici: seulement réordonnancement des sections (text/plain), pas le contenu d’une section
+      if (!e.dataTransfer.types.includes('text/plain') || e.dataTransfer.types.includes(DND_MIME)) return;
       e.preventDefault();
       const from = +e.dataTransfer.getData('text/plain'); const to = i;
-      if (from===to) return;
+      if (!Number.isInteger(from) || from===to) return;
       const [m]=sections.splice(from,1); sections.splice(to,0,m);
       save(); renderAll(); selectSection(to);
     });
+
     list.appendChild(item);
   });
 }
@@ -782,31 +881,53 @@ function bindSectionInputs(){
 function refreshFieldUI(){ if (currentSection<0) return; renderFields(S()[currentSection].fields || []); }
 
 /* --- DnD take/insert --- */
-function takeFieldFrom(payload){
-  const sec = S()[currentSection];
-  if (!sec) return null;
-  if (payload.from === 'group'){
-    const { group } = findGroupByUid(payload.gid);
-    if (!group || !Array.isArray(group.fields)) return null;
-    const [m] = group.fields.splice(payload.fi, 1);
-    return m || null;
-  } else if (payload.from === 'root'){
-    const arr = sec.fields || [];
-    const [m] = arr.splice(payload.fi, 1);
-    return isField(m) ? m : null;
+function getProcess(idx){ return PROCESSES[idx] || null; }
+function getSection(procIdx, secIdx){
+  const p = getProcess(procIdx); return (p && p.sections && p.sections[secIdx]) || null;
+}
+
+/* Retire un item (field ou group) de sa source et le retourne */
+function takeItemFrom(payload){
+  const {kind, from, proc, sec, gi, fi, gid} = payload || {};
+  const section = getSection(proc, sec); if (!section) return null;
+
+  if (kind === 'field'){
+    if (from === 'group'){
+      const g = section.fields?.[gi];
+      if (!g || !isGroup(g)) return null;
+      const arr = g.fields || [];
+      const [m] = arr.splice(fi, 1);
+      return isField(m) ? m : null;
+    } else { // root
+      const arr = section.fields || [];
+      const [m] = arr.splice(fi, 1);
+      return isField(m) ? m : null;
+    }
   }
+
+  if (kind === 'group' && from === 'root'){
+    const arr = section.fields || [];
+    const [m] = arr.splice(gi, 1);
+    return isGroup(m) ? m : null;
+  }
+
   return null;
 }
-function insertFieldAtRoot(field, beforeIdx=null){
-  const arr = S()[currentSection]?.fields || [];
-  const at = (beforeIdx==null || beforeIdx<0 || beforeIdx>arr.length) ? 0 : beforeIdx; 
+
+/* Insère un FIELD à la racine d’une section (avant l’index si fourni) */
+function insertFieldAtRoot(procIdx, secIdx, field, beforeIdx=null){
+  const sec = getSection(procIdx, secIdx); if (!sec) return;
+  const arr = sec.fields || (sec.fields = []);
+  const at = (beforeIdx==null || beforeIdx<0 || beforeIdx>arr.length) ? arr.length : beforeIdx;
   arr.splice(at, 0, field);
 }
-function insertFieldInGroupByUid(gid, field, pos=null){
-  const { group } = findGroupByUid(gid); if (!group) return;
-  const arr = group.fields || (group.fields=[]);
-  const at = (pos==null || pos<0 || pos>arr.length) ? 0 : pos;
-  arr.splice(at, 0, field);
+
+/* Insère un GROUP à la racine d’une section (avant l’index si fourni) */
+function insertGroupAtRoot(procIdx, secIdx, group, beforeIdx=null){
+  const sec = getSection(procIdx, secIdx); if (!sec) return;
+  const arr = sec.fields || (sec.fields = []);
+  const at = (beforeIdx==null || beforeIdx<0 || beforeIdx>arr.length) ? arr.length : beforeIdx;
+  arr.splice(at, 0, group);
 }
 
 /* --- Rendu items (root + groupes) --- */
@@ -814,9 +935,11 @@ function renderFields(items){
   const box = $('#fieldList'); box.innerHTML = '';
 
   if (!box._dndBound){
+    // Drop à la racine de la section (avant un item survolé, ou à la fin)
     box.addEventListener('dragover', (e)=>{
+      if (!e.dataTransfer.types.includes(DND_MIME)) return;
       e.preventDefault(); e.stopPropagation();
-      if (e.target.closest('.group-fields')) return;
+      if (e.target.closest('.group-fields')) return; // pas ici : ce sera géré par le container du groupe
       box.classList.add('drop-target');
     });
     box.addEventListener('dragleave', (e)=>{
@@ -826,27 +949,42 @@ function renderFields(items){
     box.addEventListener('drop', (e)=>{
       if (!beginDrop(e)) return;
       box.classList.remove('drop-target');
-      const overItem = e.target.closest('.field-item');
-      let beforeIdx = null;
-      if (overItem && !overItem.closest('.group-fields')) beforeIdx = +overItem.dataset.index;
 
-      const raw = e.dataTransfer.getData('application/x-json-field'); if (!raw) { endDrop(); return; }
+      const overItem = e.target.closest('.field-item, .group-item');
+      let beforeIdx = null;
+      if (overItem && !overItem.closest('.group-fields')) {
+        // Si on survole un item racine (champ ou groupe), on insère avant lui
+        beforeIdx = +overItem.dataset.index;
+      }
+
+      const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
       const payload = JSON.parse(raw);
 
-      if (beforeIdx != null && payload.from === 'root' && payload.fi < beforeIdx) beforeIdx -= 1;
+      // Corriger l’index si on déplace dans la même liste après l’extraction
+      if (beforeIdx!=null && payload.from==='root' &&
+          payload.proc===currentProcess && payload.sec===currentSection){
+        const isGrp = payload.kind==='group';
+        const srcIdx = isGrp ? payload.gi : payload.fi;
+        if (srcIdx < beforeIdx) beforeIdx -= 1;
+      }
 
-      const moved = takeFieldFrom(payload); if (!moved || !isField(moved)) { endDrop(); return; }
-      insertFieldAtRoot(moved, beforeIdx);
+      const moved = takeItemFrom(payload); if (!moved) { endDrop(); return; }
+      if (isGroup(moved)) insertGroupAtRoot(currentProcess, currentSection, moved, beforeIdx);
+      else insertFieldAtRoot(currentProcess, currentSection, moved, beforeIdx);
+
       e.dataTransfer.dropEffect = 'move';
       markDrop(); endDrop();
     });
+
     box._dndBound = true;
   }
 
   (items||[]).forEach((it, idx)=>{
     if (isGroup(it)) {
+      // ======= GROUPE RACINE =======
       const g = document.createElement('div');
       g.className = 'group-item'; g.dataset.index = idx; g.dataset.gid = it.__uid;
+      g.draggable = true;
       g.innerHTML = `
         <div class="group-head">
           <input type="checkbox" class="select-box" data-kind="group" data-index="${idx}" title="Sélectionner"/>
@@ -862,21 +1000,81 @@ function renderFields(items){
         <div class="group-fields"></div>
       `;
 
-      const inner = g.querySelector('.group-fields');
+      /* Drag du groupe (root only) */
+      g.addEventListener('dragstart', (e)=>{
+        g.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData(DND_MIME, JSON.stringify({
+          kind:'group', from:'root', proc: currentProcess, sec: currentSection, gi: idx, gid: it.__uid
+        }));
+      });
+      g.addEventListener('dragend', ()=> g.classList.remove('dragging'));
 
-      inner.addEventListener('dragover', (e)=>{ e.preventDefault(); e.stopPropagation(); inner.classList.add('drop-target'); });
-      inner.addEventListener('dragleave', (e)=>{ e.stopPropagation(); if (!inner.contains(e.relatedTarget)) inner.classList.remove('drop-target'); });
-      inner.addEventListener('drop', (e)=>{
+      /* Déposer un ITEM (field ou group) avant ce groupe */
+      g.addEventListener('dragover', (e)=>{
+        if (!e.dataTransfer.types.includes(DND_MIME)) return;
+        e.preventDefault(); e.stopPropagation();
+        g.classList.add('drop-before');
+      });
+      g.addEventListener('dragleave', (e)=>{ e.stopPropagation(); g.classList.remove('drop-before'); });
+      g.addEventListener('drop', (e)=>{
         if (!beginDrop(e)) return;
-        inner.classList.remove('drop-target');
-        const raw = e.dataTransfer.getData('application/x-json-field'); if (!raw) { endDrop(); return; }
+        g.classList.remove('drop-before');
+
+        const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
         const payload = JSON.parse(raw);
-        const moved = takeFieldFrom(payload); if (!moved || !isField(moved)) { endDrop(); return; }
-        insertFieldInGroupByUid(g.dataset.gid, moved, null);
+
+        // Prendre l’item de sa source
+        const moved = takeItemFrom(payload); if (!moved) { endDrop(); return; }
+
+        // Destination = AVANT ce groupe
+        const destProc = currentProcess;
+        const destSec  = currentSection;
+        let destIndex  = idx;
+        // Ajuste si on vient de la même liste
+        if (payload.kind==='group' && payload.from==='root' &&
+            payload.proc===destProc && payload.sec===destSec && payload.gi < destIndex){
+          destIndex -= 1;
+        }
+
+        if (isGroup(moved)) {
+          insertGroupAtRoot(destProc, destSec, moved, destIndex);
+        } else if (isField(moved)) {
+          insertFieldAtRoot(destProc, destSec, moved, destIndex);
+        }
+
         e.dataTransfer.dropEffect = 'move';
         markDrop(); endDrop();
       });
 
+      const inner = g.querySelector('.group-fields');
+
+      // ======= CONTENEUR DU GROUPE (déposer un CHAMP à l'intérieur, à la fin) =======
+      inner.addEventListener('dragover', (e)=>{
+        if (!e.dataTransfer.types.includes(DND_MIME)) return;
+        e.preventDefault(); e.stopPropagation();
+        inner.classList.add('drop-target');
+      });
+      inner.addEventListener('dragleave', (e)=>{
+        e.stopPropagation();
+        if (!inner.contains(e.relatedTarget)) inner.classList.remove('drop-target');
+      });
+      inner.addEventListener('drop', (e)=>{
+        if (!beginDrop(e)) return;
+        inner.classList.remove('drop-target');
+
+        const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
+        const payload = JSON.parse(raw);
+        if (payload.kind !== 'field'){ endDrop(); return; } // pas de groupe dans un groupe
+
+        const moved = takeItemFrom(payload); if (!moved || !isField(moved)) { endDrop(); return; }
+        insertFieldInGroupByUid(g.dataset.gid, moved, null);
+
+        e.dataTransfer.dropEffect = 'move';
+        markDrop(); endDrop();
+      });
+
+      // ======= CHAMPS À L’INTÉRIEUR DU GROUPE =======
       (it.fields||[]).forEach((f, j)=>{
         const item = document.createElement('div');
         item.className = 'field-item'; item.draggable = true; item.dataset.index = `${idx}:${j}`;
@@ -897,31 +1095,43 @@ function renderFields(items){
             <button class="btn danger" data-act="del">Supprimer</button>
           </div>`;
 
+        // dragstart: champ en groupe
         item.addEventListener('dragstart', (e)=>{
           item.classList.add('dragging');
           e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('application/x-json-field', JSON.stringify({from:'group', gid:it.__uid, fi:j}));
+          e.dataTransfer.setData(DND_MIME, JSON.stringify({
+            kind:'field', from:'group', proc: currentProcess, sec: currentSection, gi: idx, fi: j, gid: it.__uid
+          }));
         });
         item.addEventListener('dragend', ()=> item.classList.remove('dragging'));
 
+        // drop-before sur un champ de ce groupe (réordonne dans ce groupe)
         item.addEventListener('dragover', (e)=>{
+          if (!e.dataTransfer.types.includes(DND_MIME)) return;
           e.preventDefault(); e.stopPropagation();
-          if (e.dataTransfer.types.includes('application/x-json-field')) item.classList.add('drop-before');
+          item.classList.add('drop-before');
         });
         item.addEventListener('dragleave', (e)=>{ e.stopPropagation(); item.classList.remove('drop-before'); });
         item.addEventListener('drop', (e)=>{
           if (!beginDrop(e)) return;
           item.classList.remove('drop-before');
-          const raw = e.dataTransfer.getData('application/x-json-field'); if (!raw) { endDrop(); return; }
+
+          const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
           const payload = JSON.parse(raw);
+          if (payload.kind !== 'field'){ endDrop(); return; } // pas de groupe dans un groupe
+
+          // destination: avant cet item J dans ce groupe
           let dest = j;
           if (payload.from === 'group' && payload.gid === it.__uid && payload.fi < dest) dest -= 1;
-          const moved = takeFieldFrom(payload); if (!moved || !isField(moved)) { endDrop(); return; }
+
+          const moved = takeItemFrom(payload); if (!moved || !isField(moved)) { endDrop(); return; }
           insertFieldInGroupByUid(it.__uid, moved, dest);
+
           e.dataTransfer.dropEffect = 'move';
           markDrop(); endDrop();
         });
 
+        // Actions boutons
         item.addEventListener('click', (e)=>{
           if (isRecentDrop()) return;
           const act = e.target.closest('button')?.dataset?.act || 'edit';
@@ -947,6 +1157,7 @@ function renderFields(items){
 
       box.appendChild(g);
     } else {
+      // ======= CHAMP RACINE =======
       const f = it;
       const item = document.createElement('div');
       item.className = 'field-item'; item.draggable = true; item.dataset.index = idx;
@@ -967,31 +1178,48 @@ function renderFields(items){
           <button class="btn danger" data-act="del">Supprimer</button>
         </div>`;
 
+      // dragstart: champ racine
       item.addEventListener('dragstart', (e)=>{
         item.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('application/x-json-field', JSON.stringify({from:'root', fi:+item.dataset.index}));
+        e.dataTransfer.setData(DND_MIME, JSON.stringify({
+          kind:'field', from:'root', proc: currentProcess, sec: currentSection, fi: +item.dataset.index
+        }));
       });
       item.addEventListener('dragend', ()=> item.classList.remove('dragging'));
 
+      // drop-before (insérer avant cet item racine)
       item.addEventListener('dragover', (e)=>{
+        if (!e.dataTransfer.types.includes(DND_MIME)) return;
         e.preventDefault(); e.stopPropagation();
-        if (e.dataTransfer.types.includes('application/x-json-field')) item.classList.add('drop-before');
+        item.classList.add('drop-before');
       });
       item.addEventListener('dragleave', (e)=>{ e.stopPropagation(); item.classList.remove('drop-before'); });
       item.addEventListener('drop', (e)=>{
         if (!beginDrop(e)) return;
         item.classList.remove('drop-before');
-        const raw = e.dataTransfer.getData('application/x-json-field'); if (!raw) { endDrop(); return; }
+
+        const raw = e.dataTransfer.getData(DND_MIME); if (!raw) { endDrop(); return; }
         const payload = JSON.parse(raw);
+
+        // destination: avant cet item
         let dest = +item.dataset.index;
-        if (payload.from === 'root' && payload.fi < dest) dest -= 1;
-        const moved = takeFieldFrom(payload); if (!moved || !isField(moved)) { endDrop(); return; }
-        insertFieldAtRoot(moved, dest);
+        if (payload.from === 'root' &&
+            payload.proc === currentProcess &&
+            payload.sec  === currentSection) {
+          const srcIdx = (payload.kind === 'group') ? payload.gi : payload.fi;
+          if (srcIdx < dest) dest -= 1;
+        }
+
+        const moved = takeItemFrom(payload); if (!moved) { endDrop(); return; }
+        if (isGroup(moved)) insertGroupAtRoot(currentProcess, currentSection, moved, dest);
+        else insertFieldAtRoot(currentProcess, currentSection, moved, dest);
+
         e.dataTransfer.dropEffect = 'move';
         markDrop(); endDrop();
       });
 
+      // Actions boutons
       item.addEventListener('click', (e)=>{
         if (isRecentDrop()) return;
         const act = e.target.closest('button')?.dataset?.act || 'edit';
@@ -1418,7 +1646,8 @@ function bindGlobal(){
     toast('Groupe ajouté');
   });
 
-
+  $('#btnGroupSelected')?.addEventListener('click', groupSelected);
+  
   $('#btnUmlZip')?.addEventListener('click', exportAllUmlZIP);
 
 
@@ -1661,48 +1890,12 @@ async function makeZipAES(files, password){
   return await writer.close();
 }
 
-// (REMPLACE) ZIP chiffré **ZipCrypto** (compatible Explorateur Windows)
-async function makeZipForWindows(files, password){
-  if (!window.zip) throw new Error('zip.js introuvable');
-  const writer = new zip.ZipWriter(new zip.BlobWriter('application/zip'), {
-    password,          // ← active le chiffrement
-    zipCrypto: true,   // ← **INDISPENSABLE** pour Windows Explorer
-    level: 9           // (optionnel) meilleure compression
-  });
-  for (const f of files){
-    await writer.add(
-      f.name,
-      new zip.Uint8ArrayReader(f.data),
-      { lastModDate: f.date || new Date() }
-    );
-  }
-  return await writer.close();
-}
-
-// ⚠️ Avertissement sécurité faible (ZipCrypto pour Windows)
-async function warnWeakZipCrypto(){
-  return await confirmWarning(
-    '⚠️ Limitation de sécurité imposée par Microsoft Windows',
-    "Ce ZIP sera chiffré en **ZipCrypto**, un mécanisme **ancien, vulnérable et facilement cassable**.\n\n" +
-    "➡️ **Important : ce choix n’est pas dû à l’application**, mais à une **limitation de l’Explorateur Windows**, qui refuse d’ouvrir les ZIP protégés avec un chiffrement moderne (AES) et n’accepte que ce vieux standard.\n\n" +
-    "Conséquences :\n" +
-    "• Considérez que ce ZIP est **faiblement protégé, presque comme s’il ne l’était pas**.\n" +
-    "• Ne stockez pas ce ZIP sur des canaux non sûrs (cloud public, USB partagé, e-mail non sécurisé…)\n" +
-    "• Ne le partagez qu’avec des personnes de confiance\n" +
-    "En continuant, vous reconnaissez cette faiblesse imposée par Microsoft Windows et acceptez les risques.",
-    "J’ai compris, continuer"
-  );
-}
-
 /* Build ZIP de tous les processus activés */
 /* (REMPLACE) Build ZIP UML protégé AES */
 async function exportAllUmlZIP(){
   const procs = PROCESSES.filter(p=>p.enabled!==false);
   if (!procs.length){ alert('Aucun processus activé'); return; }
-  
-  const okWeak = await warnWeakZipCrypto();
-  if (!okWeak) return;
-  
+
   const pwd = await promptPassword('Schéma UML (ZIP protégé)', 'Choisissez un mot de passe pour le ZIP.');
   if (!pwd) return;
 
@@ -1721,7 +1914,7 @@ async function exportAllUmlZIP(){
 
   let zipBlob;
   try{
-    zipBlob = await makeZipForWindows(files, pwd);    // << chiffrage ZipCrypto (faible, imposé par Microsoft Windows)
+    zipBlob = await makeZipAES(files, pwd);    // << chiffrage AES
   }catch(e){
     // Fallback (non chiffré) si zip.js indispo
     console.warn('zip.js indisponible, fallback non chiffré', e);
