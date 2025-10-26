@@ -1,4 +1,4 @@
- <!doctype html>
+<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8" />
@@ -990,6 +990,7 @@ function renderFields(items){
 
       // Drag du groupe
       g.addEventListener('dragstart',(e)=>{
+        if (e.target.closest('.field-item')) return;
         g.classList.add('dragging');
         e.dataTransfer.effectAllowed='move';
         e.dataTransfer.setData(DND_MIME, JSON.stringify({kind:'group',from:'root',proc:currentProcess,sec:currentSection,gi:idx,gid:it.__uid}));
@@ -1128,15 +1129,17 @@ function renderFields(items){
       item.append(drag, cb, meta, right);
 
       item.addEventListener('dragstart',(e)=>{
+        e.stopPropagation(); 
         item.classList.add('dragging');
         e.dataTransfer.effectAllowed='move';
         e.dataTransfer.setData(DND_MIME, JSON.stringify({kind:'field',from:'root',proc:currentProcess,sec:currentSection,fi:+item.dataset.index}));
       });
-      item.addEventListener('dragend',()=> item.classList.remove('dragging'));
-      item.addEventListener('dragover',(e)=>{ if (hasType(e.dataTransfer,DND_MIME)){ e.preventDefault(); e.stopPropagation(); item.classList.add('drop-before'); }});
-      item.addEventListener('dragleave',()=> item.classList.remove('drop-before'));
+      item.addEventListener('dragend',()=> e.stopPropagation(); item.classList.remove('dragging'));
+      item.addEventListener('dragover',(e)=>{ e.stopPropagation(); if (hasType(e.dataTransfer,DND_MIME)){ e.preventDefault(); e.stopPropagation(); item.classList.add('drop-before'); }});
+      item.addEventListener('dragleave',()=> e.stopPropagation(); item.classList.remove('drop-before'));
       item.addEventListener('drop',(e)=>{
         if (!beginDrop(e)) return;
+        e.stopPropagation(); 
         item.classList.remove('drop-before');
         const payload = JSON.parse(e.dataTransfer.getData(DND_MIME) || '{}');
 
