@@ -1045,6 +1045,7 @@ function renderFields(items){
         e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
       });
 
+      // Champs DANS le groupe
       (it.fields||[]).forEach((f,j)=>{
         const item = el('div','field-item'); item.draggable=true; item.dataset.index=`${idx}:${j}`;
         const drag = el('div','drag','⋮'); drag.title='Glisser pour réorganiser/déplacer';
@@ -1072,6 +1073,7 @@ function renderFields(items){
 
         item.append(drag, cb, meta, right);
 
+        // DnD d'un champ dans un groupe
         item.addEventListener('dragstart',(e)=>{
           item.classList.add('dragging');
           e.dataTransfer.effectAllowed='move';
@@ -1092,34 +1094,86 @@ function renderFields(items){
           e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
         });
 
+        // CLIC d'édition sur un champ DANS le groupe
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (isRecentDrop()) return;
+
+          const act = e.target.closest('button')?.dataset?.act || 'edit';
+
+          const sec = S()[currentSection];
+          if (!sec) return;
+          const grp = sec.fields?.[idx];
+          if (!grp || !isGroup(grp)) return;
+          const gArr = grp.fields || (grp.fields = []);
+
+          if (act === 'edit') {
+            editingGroupIndex = idx;
+            editingFieldIndex = j;
+            openFieldEditor(gArr[j]);
+            renderPreview();
+          } else if (act === 'del') {
+            if (confirm('Supprimer ce champ ?')) {
+              gArr.splice(j, 1);
+              editingFieldIndex = -1;
+              save(); renderAll(); selectSection(currentSection); toast('Champ supprimé');
+            }
+          } else if (act === 'up') {
+            if (j > 0) {
+              const [m] = gArr.splice(j, 1);
+              gArr.splice(j - 1, 0, m);
+              editingFieldIndex = j - 1;
+              save(); renderAll(); selectSection(currentSection);
+            }
+          } else if (act === 'down') {
+            if (j < gArr.length - 1) {
+              const [m] = gArr.splice(j, 1);
+              gArr.splice(j + 1, 0, m);
+              editingFieldIndex = j + 1;
+              save(); renderAll(); selectSection(currentSection);
+            }
+          }
+        });
+
         inner.appendChild(item);
       });
 
       g.append(head, inner);
-      g.addEventListener('click',(e)=>{
+
+      // CLICS sur l'en-tête du groupe uniquement
+      g.addEventListener('click', (e) => {
         if (isRecentDrop()) return;
-        const act=e.target.closest('button')?.dataset?.act;
+        if (e.target.closest('.group-fields')) return; // ignorer clics dans les items
+        if (!e.target.closest('.group-head')) return;  // ne réagir qu'à l'en-tête
+
+        const act = e.target.closest('button')?.dataset?.act;
         if (!act) return;
+
         const arr = S()[currentSection].fields;
-        if (act==='edit'){
-          editingGroupIndex=idx; editingFieldIndex=-1;
+        if (act === 'edit') {
+          editingGroupIndex = idx; editingFieldIndex = -1;
           $('#groupEditor')?.classList.remove('hidden');
           $('#editorArea')?.classList.remove('hidden');
           $('#grpName').value = it.name || '';
           $('#grpLabel').value = it.label || '';
           $('#grpRequired').value = it.required ? 'true' : 'false';
           $('#grpRepeatable').value = it.repeatable ? 'true' : 'false';
-        } else if (act==='del'){
-          if (confirm('Supprimer le groupe ?')){ arr.splice(idx,1); editingGroupIndex=-1; save(); renderAll(); selectSection(currentSection); toast('Groupe supprimé'); }
-        } else if (act==='up'){
-          if (idx>0){ const [m]=arr.splice(idx,1); arr.splice(idx-1,0,m); save(); renderAll(); selectSection(currentSection); }
-        } else if (act==='down'){
-          if (idx<arr.length-1){ const [m]=arr.splice(idx,1); arr.splice(idx+1,0,m); save(); renderAll(); selectSection(currentSection); }
+        } else if (act === 'del') {
+          if (confirm('Supprimer le groupe ?')) {
+            arr.splice(idx, 1); editingGroupIndex = -1;
+            save(); renderAll(); selectSection(currentSection); toast('Groupe supprimé');
+          }
+        } else if (act === 'up') {
+          if (idx > 0) { const [m] = arr.splice(idx, 1); arr.splice(idx - 1, 0, m); save(); renderAll(); selectSection(currentSection); }
+        } else if (act === 'down') {
+          if (idx < arr.length - 1) { const [m] = arr.splice(idx, 1); arr.splice(idx + 1, 0, m); save(); renderAll(); selectSection(currentSection); }
         }
       });
 
       box.appendChild(g);
+
     } else {
+      // ====== CHAMP RACINE ======
       const f = it;
       const item = el('div','field-item'); item.draggable=true; item.dataset.index=idx;
 
@@ -1149,33 +1203,31 @@ function renderFields(items){
 
       item.append(drag, cb, meta, right);
 
+      // DnD champ racine
       item.addEventListener('dragstart',(e)=>{
-        e.stopPropagation(); 
+        e.stopPropagation();
         item.classList.add('dragging');
         e.dataTransfer.effectAllowed='move';
         e.dataTransfer.setData(DND_MIME, JSON.stringify({kind:'field',from:'root',proc:currentProcess,sec:currentSection,fi:+item.dataset.index}));
       });
-        item.addEventListener('dragend', (e) => {
-          e.stopPropagation();
-          item.classList.remove('dragging');
-        });
-        
-        item.addEventListener('dragover', (e) => {
-          e.stopPropagation();
-          if (hasType(e.dataTransfer, DND_MIME)) {
-            e.preventDefault();
-            item.classList.add('drop-before');
-          }
-        });
-        
-        item.addEventListener('dragleave', (e) => {
-          e.stopPropagation();
-          item.classList.remove('drop-before');
-        });
-
+      item.addEventListener('dragend', (e) => {
+        e.stopPropagation();
+        item.classList.remove('dragging');
+      });
+      item.addEventListener('dragover', (e) => {
+        e.stopPropagation();
+        if (hasType(e.dataTransfer, DND_MIME)) {
+          e.preventDefault();
+          item.classList.add('drop-before');
+        }
+      });
+      item.addEventListener('dragleave', (e) => {
+        e.stopPropagation();
+        item.classList.remove('drop-before');
+      });
       item.addEventListener('drop',(e)=>{
         if (!beginDrop(e)) return;
-        e.stopPropagation(); 
+        e.stopPropagation();
         item.classList.remove('drop-before');
         const payload = JSON.parse(e.dataTransfer.getData(DND_MIME) || '{}');
 
@@ -1191,20 +1243,30 @@ function renderFields(items){
         e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
       });
 
+      // CLIC d'édition champ RACINE
       item.addEventListener('click',(e)=>{
         if (isRecentDrop()) return;
-        const act=e.target.closest('button')?.dataset?.act || 'edit';
+        const act = e.target.closest('button')?.dataset?.act || 'edit';
         const arr = S()[currentSection].fields;
+
         if (act==='edit'){
-          editingGroupIndex=-1; editingFieldIndex=idx;
-          openFieldEditor(arr[idx]);
+          editingGroupIndex = -1;
+          editingFieldIndex = +item.dataset.index;
+          openFieldEditor(arr[editingFieldIndex]);
           renderPreview();
         } else if (act==='del'){
-          if (confirm('Supprimer ce champ ?')){ arr.splice(idx,1); editingFieldIndex=-1; save(); renderAll(); selectSection(currentSection); toast('Champ supprimé'); }
+          if (confirm('Supprimer ce champ ?')){
+            const i = +item.dataset.index;
+            arr.splice(i,1);
+            editingFieldIndex = -1;
+            save(); renderAll(); selectSection(currentSection); toast('Champ supprimé');
+          }
         } else if (act==='up'){
-          if (idx>0){ const [m]=arr.splice(idx,1); arr.splice(idx-1,0,m); save(); renderAll(); selectSection(currentSection); }
+          const i = +item.dataset.index;
+          if (i>0){ const [m]=arr.splice(i,1); arr.splice(i-1,0,m); save(); renderAll(); selectSection(currentSection); }
         } else if (act==='down'){
-          if (idx<arr.length-1){ const [m]=arr.splice(idx,1); arr.splice(idx+1,0,m); save(); renderAll(); selectSection(currentSection); }
+          const i = +item.dataset.index;
+          if (i<arr.length-1){ const [m]=arr.splice(i,1); arr.splice(i+1,0,m); save(); renderAll(); selectSection(currentSection); }
         }
       });
 
@@ -1212,6 +1274,7 @@ function renderFields(items){
     }
   });
 }
+
 
 function openFieldEditor(f){
   const area=$('#editorArea'); area?.classList.remove('hidden');
