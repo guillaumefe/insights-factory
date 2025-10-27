@@ -1244,7 +1244,20 @@ function findGroupByUid(uid){
 /* --- Rendu Fields & Groupes --- */
 let _dropBusy=false; let _justDroppedAt=0;
 function beginDrop(e){ if (_dropBusy) return false; _dropBusy=true; e?.preventDefault?.(); e?.stopPropagation?.(); e?.stopImmediatePropagation?.(); return true; }
-function endDrop(){ requestAnimationFrame(()=>{ save(); renderAll(); selectSection(currentSection); _dropBusy=false; }); }
+
+function endDrop(){
+  requestAnimationFrame(()=>{
+    save();
+    preservePanelScroll(() => {
+      renderAll();
+      selectSection(currentSection);
+    });
+    // recentre (doucement) sur l’élément en édition si défini
+    scrollEditingIntoView();
+    _dropBusy = false;
+  });
+}
+  
 function markDrop(){ _justDroppedAt = performance.now(); }
 function isRecentDrop(){ return performance.now() - _justDroppedAt < 150; }
 
