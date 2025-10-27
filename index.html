@@ -253,7 +253,11 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
   border-radius:14px; box-shadow:var(--shadow); padding:16px;
 }
 .modal h3{ margin:0 0 8px; font-size:16px }
-.modal p{ margin:4px 0 10px; color:var(--muted) }
+.modal p{
+  margin:4px 0 10px;
+  color:var(--muted);
+  white-space:pre-line; /* ← permet d’afficher \n \n */
+}
 .modal .row{ display:flex; gap:8px; align-items:center }
 .modal .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:12px }
 .modal input[type="password"], .modal input[type="text"]{ width:100% }
@@ -1615,12 +1619,50 @@ async function makeZipAES(files, password){
   }
   return await writer.close();
 }
+
+// (REMPLACE) ZIP chiffré **ZipCrypto** (compatible Explorateur Windows)
+async function makeZipForWindows(files, password){
+  if (!window.zip) throw new Error('zip.js introuvable');
+  const writer = new zip.ZipWriter(new zip.BlobWriter('application/zip'), {
+    password,          // ← active le chiffrement
+    zipCrypto: true,   // ← **INDISPENSABLE** pour Windows Explorer
+    level: 9           // (optionnel) meilleure compression
+  });
+  for (const f of files){
+    await writer.add(
+      f.name,
+      new zip.Uint8ArrayReader(f.data),
+      { lastModDate: f.date || new Date() }
+    );
+  }
+  return await writer.close();
+}
+
+// ⚠️ Avertissement sécurité faible (ZipCrypto pour Windows)
+async function warnWeakZipCrypto(){
+  return await confirmWarning(
+    '⚠️ Limitation de sécurité imposée par Microsoft Windows',
+    "Ce ZIP sera chiffré en **ZipCrypto**, un mécanisme **ancien, vulnérable et facilement cassable**.\n\n" +
+    "➡️ **Important : ce choix n’est pas dû à l’application**, mais à une **limitation de l’Explorateur Windows**, qui refuse d’ouvrir les ZIP protégés avec un chiffrement moderne (AES) et n’accepte que ce vieux standard.\n\n" +
+    "Conséquences :\n" +
+    "• Considérez que ce ZIP est **faiblement protégé, presque comme s’il ne l’était pas**.\n" +
+    "• Ne stockez pas ce ZIP sur des canaux non sûrs (cloud public, USB partagé, e-mail non sécurisé…)\n" +
+    "• Ne le partagez qu’avec des personnes de confiance\n" +
+    "En continuant, vous reconnaissez cette faiblesse imposée par Microsoft Windows et acceptez les risques.",
+    "J’ai compris, continuer"
+  );
+}
+
 function strToU8(s){ return new TextEncoder().encode(s); }
 function safeName(s){ return String(s||'processus').replace(/[^\p{L}\p{N}\-_.]+/gu,'_'); }
 
 async function exportAllUmlZIP(){
   const procs = PROCESSES.filter(p=>p.enabled!==false);
   if (!procs.length){ alert('Aucun processus activé'); return; }
+  
+  const okWeak = await warnWeakZipCrypto();
+  if (!okWeak) return;
+  
   const pwd = await promptPassword('Schéma UML (ZIP protégé)', 'Choisissez un mot de passe pour le ZIP.');
   if (!pwd) return;
 
@@ -1628,18 +1670,77 @@ async function exportAllUmlZIP(){
   for (const p of procs){
     const svg = generateUmlSVGFor(p);
     const base = safeName(p.name||'processus');
+    // SVG
     const svgU8 = strToU8(svg);
     files.push({ name: `${base}.uml.svg`, data: svgU8, date:new Date() });
+    // PNG
+    const pngBlob = await svgTextToPngBlob(svg);
+    const buf = new Uint8Array(await pngBlob.arrayBuffer());
+    files.push({ name: `${base}.uml.png`, data: buf, date:new Date() });
   }
+
   let zipBlob;
-  try{ zipBlob = await makeZipAES(files, pwd); }
-  catch(e){ console.warn('zip.js indisponible', e); alert("Impossible de créer un ZIP protégé (zip.js)"); return; }
+  try{
+    zipBlob = await makeZipForWindows(files, pwd);    // << chiffrage ZipCrypto (faible, imposé par Microsoft Windows)
+  }catch(e){
+    // Fallback (non chiffré) si zip.js indispo
+    console.warn('zip.js indisponible, fallback non chiffré', e);
+    zipBlob = await makeZip(files);            // << store only (non protégé)
+  }
   const zipUrl = URL.createObjectURL(zipBlob);
   const name = `uml_exports_${new Date().toISOString().replace(/[:.]/g,'-')}.zip`;
   const a = document.createElement('a'); a.href = zipUrl; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(zipUrl);
   toast('ZIP UML exporté (protégé) ✅');
 }
+
+// --- AJOUT 1 : ZIP non chiffré (fallback) ---
+async function makeZip(files){
+  if (!window.zip) throw new Error('zip.js introuvable');
+  const writer = new zip.ZipWriter(new zip.BlobWriter('application/zip')); // pas de password
+  for (const f of files){
+    await writer.add(
+      f.name,
+      new zip.Uint8ArrayReader(f.data),
+      { lastModDate: f.date || new Date() }
+    );
+  }
+  return await writer.close();
+}
+
+// --- AJOUT 2 : Rasterisation SVG -> PNG via <canvas> ---
+async function svgTextToPngBlob(svgText, scale = 2){
+  const svgBlob = new Blob([svgText], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(svgBlob);
+  try{
+    const img = new Image();
+    img.decoding = 'async';
+    const loaded = new Promise((resolve, reject)=>{
+      img.onload = () => resolve();
+      img.onerror = reject;
+    });
+    img.src = url;
+    await loaded;
+
+    const w = img.naturalWidth  || img.width;
+    const h = img.naturalHeight || img.height;
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = Math.ceil(w * scale);
+    canvas.height = Math.ceil(h * scale);
+
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.drawImage(img, 0, 0);
+
+    const pngBlob = await new Promise((res)=> canvas.toBlob(res, 'image/png'));
+    if (!pngBlob) throw new Error('canvas.toBlob a retourné null');
+    return pngBlob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 
 /* Bind global */
 function bindGlobal(){
