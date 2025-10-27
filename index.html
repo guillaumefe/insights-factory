@@ -1283,13 +1283,18 @@ function duplicateFieldAtRoot(rootIndex){
   const src = arr[rootIndex]; if (!isField(src)) return;
 
   const copy = deepClone(src);
-  _renameFieldUnique(copy);                 // assure un name unique
+  _renameFieldUnique(copy);
   arr.splice(rootIndex + 1, 0, copy);
 
   editingGroupIndex = -1;
   editingFieldIndex = rootIndex + 1;
 
-  save(); renderAll(); selectSection(currentSection);
+  save();
+  preservePanelScroll(() => {
+    renderAll();
+    selectSection(currentSection);
+  });
+  scrollEditingIntoView();
   toast('Champ dupliqué ✅');
 }
 
@@ -1301,13 +1306,18 @@ function duplicateFieldInGroup(groupIndex, fieldIndex){
   const src = arr[fieldIndex]; if (!isField(src)) return;
 
   const copy = deepClone(src);
-  _renameFieldUnique(copy);                 // assure un name unique
+  _renameFieldUnique(copy);
   arr.splice(fieldIndex + 1, 0, copy);
 
   editingGroupIndex = groupIndex;
   editingFieldIndex = fieldIndex + 1;
 
-  save(); renderAll(); selectSection(currentSection);
+  save();
+  preservePanelScroll(() => {
+    renderAll();
+    selectSection(currentSection);
+  });
+  scrollEditingIntoView();
   toast('Champ dupliqué ✅');
 }
 
