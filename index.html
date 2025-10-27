@@ -350,11 +350,12 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
       <h1><span class="brand">!nsight-Factory</span></h1>
     </div>
     <div class="toolbar">
-      <label class="btn ghost inline" for="fileImport" style="cursor:pointer"><span class="icon">📥</span>Importer JSON</label>
+      <label class="btn ghost inline" for="fileImport" style="cursor:pointer"><span class="icon">📥</span>Importer la mémoire</label>
       <input id="fileImport" type="file" accept="application/json,.json" class="hidden">
-      <button class="btn" id="btnExport"><span class="icon">💾</span>Exporter JSON</button>
+      <button class="btn" id="btnExport"><span class="icon">💾</span>Exporter la mémoire</button>
       <button class="btn primary" id="btnCopy"><span class="icon">📋</span>Copier le JSON</button>
-      <button class="btn" id="btnUmlZip"><span class="icon">🧩</span>Schéma UML (ZIP)</button>
+      <button class="btn" id="btnProcZip"><span class="icon">🗃️</span>Exporter le processus (ZIP)</button>
+      <button class="btn" id="btnUmlZip"><span class="icon">🧩</span>Exporter les schéma UML (ZIP)</button>
     </div>
   </header>
 
@@ -1642,10 +1643,10 @@ async function makeZipForWindows(files, password){
 async function warnWeakZipCrypto(){
   return await confirmWarning(
     '⚠️ Limitation de sécurité imposée par Microsoft Windows',
-    "Ce ZIP sera chiffré en **ZipCrypto**, un mécanisme **ancien, vulnérable et facilement cassable**.\n\n" +
-    "➡️ **Important : ce choix n’est pas dû à l’application**, mais à une **limitation de l’Explorateur Windows**, qui refuse d’ouvrir les ZIP protégés avec un chiffrement moderne (AES) et n’accepte que ce vieux standard.\n\n" +
+    "Ce ZIP sera chiffré en ZipCrypto, un mécanisme ancien, vulnérable et facilement cassable.\n\n" +
+    "➡️ **Important : ce choix n’est pas dû à l’application**, mais à une limitation de l’Explorateur Windows, qui refuse d’ouvrir les ZIP protégés avec un chiffrement moderne (AES) et n’accepte que ce vieux standard.\n\n" +
     "Conséquences :\n" +
-    "• Considérez que ce ZIP est **faiblement protégé, presque comme s’il ne l’était pas**.\n" +
+    "• Considérez que ce ZIP est faiblement protégé, presque comme s’il ne l’était pas.\n" +
     "• Ne stockez pas ce ZIP sur des canaux non sûrs (cloud public, USB partagé, e-mail non sécurisé…)\n" +
     "• Ne le partagez qu’avec des personnes de confiance\n" +
     "En continuant, vous reconnaissez cette faiblesse imposée par Microsoft Windows et acceptez les risques.",
@@ -1741,6 +1742,70 @@ async function svgTextToPngBlob(svgText, scale = 2){
   }
 }
 
+async function exportProcessAsZip(){
+  // 1) Construire le JSON “processes[]” attendu par !nsights
+  const processes = getCleanModel();
+  if (!Array.isArray(processes) || processes.length === 0){
+    alert('Aucun processus activé à exporter.');
+    return;
+  }
+
+  // 2) Avertissement même que l’export UML (ZipCrypto = faible)
+  const okWeak = await warnWeakZipCrypto();
+  if (!okWeak) return;
+
+  // 3) Mot de passe du ZIP (le JSON à l’intérieur reste en clair)
+  const pwd = await promptPassword(
+    'Exporter le processus (ZIP protégé)',
+    "Choisissez un mot de passe pour le ZIP.\n\n"+
+    "⚠️ Le JSON à l’intérieur du ZIP est en clair (non chiffré).\n"+
+    "Ouvrez le ZIP puis importez le fichier JSON dans l’app !nsights."
+  );
+  if (!pwd) return;
+
+  // 4) Préparer les fichiers à mettre dans le ZIP
+  const jsonPretty = JSON.stringify(processes, null, 2);
+  const readme = [
+    "==================== AVERTISSEMENT ====================",
+    "Ce ZIP est protégé par mot de passe via ZipCrypto (faible).",
+    "Le JSON à l’intérieur est EN CLAIR (non chiffré).",
+    "=======================================================",
+    "",
+    "Pour importer dans !nsights :",
+    "1) Décompressez ce ZIP.",
+    "2) Dans !nsights, cliquez sur « 🧩 Choisir processus ».",
+    "3) Sélectionnez le fichier « processus.json ».",
+    "4) Cliquez sur « Charger le processus ».",
+    "",
+    "Format exporté : tableau de processus",
+    "[{ name, sections:[{ title, fields:[ … ]}] }]",
+    ""
+  ].join("\n");
+
+  const files = [
+    { name: 'processus.json', data: strToU8(jsonPretty), date:new Date() },
+    { name: 'README.txt',   data: strToU8(readme),      date:new Date() }
+  ];
+
+  // 5) Créer le ZIP protégé par mot de passe (ZipCrypto)
+  let zipBlob;
+  try{
+    zipBlob = await makeZipForWindows(files, pwd); // zipCrypto:true à l’intérieur
+  }catch(e){
+    console.warn('zip.js indisponible, fallback en ZIP non protégé', e);
+    zipBlob = await makeZip(files); // fallback non chiffré si besoin
+  }
+
+  // 6) Télécharger le ZIP
+  const name = `processus_${new Date().toISOString().replace(/[:.]/g,'-')}.zip`;
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+
+  toast('ZIP processus exporté (protégé) ✅\nOuvrez le ZIP et importez « processus.json » dans !nsights.');
+}
 
 /* Bind global */
 function bindGlobal(){
@@ -1873,6 +1938,8 @@ function bindGlobal(){
     renderFields(S()[currentSection].fields);
     save(); renderPreview();
   });
+  
+  $('#btnProcZip')?.addEventListener('click', exportProcessAsZip);
 
   // Protéger les checkboxes des clics de carte
   (function protectCheckboxes(){
