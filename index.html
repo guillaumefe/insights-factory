@@ -1614,36 +1614,90 @@ function renderAll(){
 
 /* --- Aperçu JSON --- */
 function cleanItem(it){
+  // --- CAS GROUPE ---
   if (isGroup(it)){
-    const g = { group:{ name:(it.name||'').trim(), ...(it.label?{label:String(it.label).trim()}:{}), ...(it.required?{required:true}:{}) , ...(it.repeatable?{repeatable:true}:{}) } };
-    g.fields = (it.fields||[]).filter(isField).map(f=>{
-      const out={ name:(f.name||'').trim(), type:f.type||'text' };
-      if (f.label) out.label=String(f.label).trim();
-      if (f.repeatable) out.repeatable=true;
-      if (f.required) out.required=true;
-      if (isOptType(f.type)) out.options=(f.options||[]).filter(x=>String(x).trim()!=='').map(String);
-      if (f.tips && (String(f.tips.icon||'').trim() || String(f.tips.text||'').trim())){
-        out.tips = { ...(f.tips.icon?{icon:String(f.tips.icon)}:{}), ...(f.tips.text?{text:String(f.tips.text)}:{}) };
+    const g = {
+      group: {
+        name: (it.name||'').trim(),
+        ...(it.label ? { label: String(it.label).trim() } : {}),
+        ...(it.required ? { required: true } : {}),
+        ...(it.repeatable ? { repeatable: true } : {})
       }
-      return out;
-    });
+    };
+
+    // Nettoyage des champs du groupe
+    g.fields = (it.fields || [])
+      .filter(isField)
+      .map(f => {
+        const out = {
+          name: (f.name || '').trim(),
+          type: f.type || 'text'
+        };
+        if (f.label) out.label = String(f.label).trim();
+        if (f.repeatable) out.repeatable = true;
+        if (f.required) out.required = true;
+
+        // radio/select : garder uniquement si options non vides après nettoyage
+        if (isOptType(f.type)) {
+          const opts = (f.options || [])
+            .map(x => String(x).trim())
+            .filter(x => x !== '');
+          if (opts.length === 0) return null; // << ignore le champ invalide
+          out.options = opts;
+        }
+
+        // Tips
+        const icon = String(f.tips?.icon || '').trim();
+        const text = String(f.tips?.text || '').trim();
+        if (icon || text) out.tips = { ...(icon ? {icon} : {}), ...(text ? {text} : {}) };
+
+        return out;
+      })
+      .filter(Boolean); // supprime les champs null (invalides)
+
+    // Groupe vide => ignorer (important pour le validateur externe)
+    if (g.fields.length === 0) return null;
+
     return g;
   }
-  const out={ name:(it.name||'').trim(), type:it.type||'text' };
-  if (it.label) out.label=String(it.label).trim();
-  if (it.repeatable) out.repeatable=true;
-  if (it.required) out.required=true;
-  if (isOptType(it.type)) out.options=(it.options||[]).filter(x=>String(x).trim()!=='').map(String);
-  if (it.tips && (String(it.tips.icon||'').trim() || String(it.tips.text||'').trim())){
-    out.tips = { ...(it.tips.icon?{icon:String(it.tips.icon)}:{}), ...(it.tips.text?{text:String(it.tips.text)}:{}) };
+
+  // --- CAS CHAMP SIMPLE ---
+  const out = {
+    name: (it.name || '').trim(),
+    type: it.type || 'text'
+  };
+  if (it.label) out.label = String(it.label).trim();
+  if (it.repeatable) out.repeatable = true;
+  if (it.required) out.required = true;
+
+  if (isOptType(it.type)) {
+    const opts = (it.options || [])
+      .map(x => String(x).trim())
+      .filter(x => x !== '');
+    if (opts.length === 0) return null; // << ignore radio/select sans options
+    out.options = opts;
   }
+
+  const icon = String(it.tips?.icon || '').trim();
+  const text = String(it.tips?.text || '').trim();
+  if (icon || text) out.tips = { ...(icon ? {icon} : {}), ...(text ? {text} : {}) };
+
   return out;
 }
+
 function getCleanModel(){
   return PROCESSES
-    .filter(p=>p.enabled!==false)
-    .map(p=>({ name:(p.name||'').trim(), sections:(p.sections||[]).map(sec=>({ title:(sec.title||'').trim(), fields:(sec.fields||[]).map(cleanItem) })) }));
+    .filter(p => p.enabled !== false)
+    .map(p => ({
+      name: (p.name || '').trim(),
+      sections: (p.sections || []).map(sec => ({
+        title: (sec.title || '').trim(),
+        // map -> cleanItem ; filter(Boolean) supprime groupes/champs invalides (ex: groupe vide)
+        fields: (sec.fields || []).map(cleanItem).filter(Boolean)
+      }))
+    }));
 }
+
 function renderPreview(){
   const clean=getCleanModel();
   $('#jsonPreview').textContent = JSON.stringify(clean, null, 2);
