@@ -342,6 +342,44 @@ button[disabled], .btn[disabled]{opacity:.6; cursor:not-allowed}
   margin-left: 8px;     /* un peu d’air entre titre et pill */
 }
 
+/* Afficher les titres complets dans le panneau gauche en mode écran */
+@media (min-width:1100px){
+  /* Les cartes peuvent passer sur 2 lignes si besoin */
+  .proc-item,
+  .section-item{
+    align-items: flex-start;
+    flex-wrap: wrap;              /* autorise le retour à la ligne */
+  }
+
+  /* Le titre prend toute la largeur disponible et peut se couper */
+  .proc-item .title,
+  .section-item .title{
+    flex: 1 1 100%;
+    min-width: 0;
+    white-space: normal;          /* plus de nowrap */
+    overflow: visible;            /* plus d’ellipse */
+    text-overflow: clip;
+    word-break: break-word;       /* évite les débordements sur mots longs */
+  }
+
+  /* La pastille et les boutons passent à la ligne si nécessaire */
+  .proc-item .pill,
+  .section-item .pill{
+    flex: 0 0 auto;
+    margin-left: 0;
+    margin-top: 4px;
+  }
+
+  .proc-item .right,
+  .section-item .right{
+    flex: 0 0 100%;               /* groupe de boutons sur la ligne suivante */
+    justify-content: flex-end;
+    gap: 6px;
+    margin-left: 0;
+    margin-top: 6px;
+  }
+}
+
 </style>
 </head>
 <body>
