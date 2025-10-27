@@ -1469,12 +1469,26 @@ function openFieldEditor(f){
 }
 
 function clearFieldEditorUI(){
-  $('#editorArea')?.classList.add('hidden');
+  // Si une section est sélectionnée, on garde l'éditeur visible
+  if (currentSection >= 0) {
+    $('#editorArea')?.classList.remove('hidden');
+  } else {
+    $('#editorArea')?.classList.add('hidden');
+  }
   $('#groupEditor')?.classList.add('hidden');
   $('#editorTitle').textContent = (currentSection>=0) ? 'Édition de la partie' : 'Aucune partie sélectionnée';
-  // Nettoie les inputs pour éviter l’effet “valeurs fantômes”
-  ['#fldName','#fldLabel','#fldOptions','#fldTipsIcon','#fldTips'].forEach(s=>{ const el=$(s); if(el) el.value=''; });
+
+  // Nettoie les inputs (état neutre)
+  ['#fldName','#fldLabel','#fldOptions','#fldTipsIcon','#fldTips'].forEach(s=>{
+    const el=$(s); if(el) el.value='';
+  });
+  // Valeurs par défaut neutres
+  if ($('#fldType'))        $('#fldType').value = 'text';
+  if ($('#fldRequired'))    $('#fldRequired').value = 'false';
+  if ($('#fldRepeatable'))  $('#fldRepeatable').value = 'false';
+  updateOptionsVisibility?.();
 }
+
 
 function highlightEditing(){
   // Retire les marquages précédents
@@ -1507,13 +1521,20 @@ function scrollEditingIntoView(){
 
 function syncEditorToState(){
   // Si pas de section sélectionnée → UI neutre
-  if (currentSection<0){ clearFieldEditorUI(); renderPreview(); return; }
+  if (currentSection < 0){
+    clearFieldEditorUI();
+    $('#editorArea')?.classList.add('hidden');
+    $('#groupEditor')?.classList.add('hidden');
+    renderPreview();
+    return;
+  }
 
-  const sec = S()[currentSection];
+  const sec  = S()[currentSection];
   const root = sec?.fields || [];
 
   // Cas 1: un champ “racine” est en cours d’édition
-  if (editingGroupIndex<0 && editingFieldIndex>=0 && root[editingFieldIndex] && root[editingFieldIndex].__kind==='field'){
+  if (editingGroupIndex < 0 && editingFieldIndex >= 0 &&
+      root[editingFieldIndex] && root[editingFieldIndex].__kind === 'field'){
     $('#editorArea')?.classList.remove('hidden');
     $('#groupEditor')?.classList.add('hidden');
     openFieldEditor(root[editingFieldIndex]);
@@ -1521,17 +1542,17 @@ function syncEditorToState(){
   }
 
   // Cas 2: un groupe est en édition
-  if (editingGroupIndex>=0 && root[editingGroupIndex] && root[editingGroupIndex].__kind==='group'){
+  if (editingGroupIndex >= 0 && root[editingGroupIndex] && root[editingGroupIndex].__kind === 'group'){
     const g = root[editingGroupIndex];
 
     // a) édition du groupe lui-même
-    if (editingFieldIndex<0){
+    if (editingFieldIndex < 0){
       $('#groupEditor')?.classList.remove('hidden');
       $('#editorArea')?.classList.remove('hidden');
-      $('#grpName').value = g.name || '';
-      $('#grpLabel').value = g.label || '';
-      $('#grpRequired').value = g.required ? 'true' : 'false';
-      $('#grpRepeatable').value = g.repeatable ? 'true' : 'false';
+      $('#grpName').value        = g.name || '';
+      $('#grpLabel').value       = g.label || '';
+      $('#grpRequired').value    = g.required ? 'true' : 'false';
+      $('#grpRepeatable').value  = g.repeatable ? 'true' : 'false';
       highlightEditing(); scrollEditingIntoView(); return;
     }
 
@@ -1545,24 +1566,42 @@ function syncEditorToState(){
     }
   }
 
-  // Rien de ciblé → par défaut on ouvre la section (et éventuellement premier champ s’il existe)
+  // Rien de ciblé → par défaut on ouvre la section (et éventuellement 1er champ/groupe)
   if (root.length){
-    // Si le 1er item est un champ → l’ouvrir ; si c’est un groupe → ouvrir le groupe
-    if (root[0].__kind==='field'){ editingGroupIndex=-1; editingFieldIndex=0; openFieldEditor(root[0]); }
-    else if (root[0].__kind==='group'){ editingGroupIndex=0; editingFieldIndex=-1;
+    if (root[0].__kind === 'field'){
+      editingGroupIndex = -1; editingFieldIndex = 0;
+      $('#groupEditor')?.classList.add('hidden');
+      $('#editorArea')?.classList.remove('hidden');
+      openFieldEditor(root[0]);
+    } else if (root[0].__kind === 'group'){
+      editingGroupIndex = 0; editingFieldIndex = -1;
       $('#groupEditor')?.classList.remove('hidden');
       $('#editorArea')?.classList.remove('hidden');
-      $('#grpName').value = root[0].name || '';
-      $('#grpLabel').value = root[0].label || '';
-      $('#grpRequired').value = root[0].required ? 'true' : 'false';
-      $('#grpRepeatable').value = root[0].repeatable ? 'true' : 'false';
+      $('#grpName').value        = root[0].name || '';
+      $('#grpLabel').value       = root[0].label || '';
+      $('#grpRequired').value    = root[0].required ? 'true' : 'false';
+      $('#grpRepeatable').value  = root[0].repeatable ? 'true' : 'false';
     } else {
+      // <<< 1ère correction (branche "inattendu" alors que root.length>0)
+      editingGroupIndex = -1;
+      editingFieldIndex = -1;
+      $('#groupEditor')?.classList.add('hidden');
+      $('#editorArea')?.classList.remove('hidden');
       clearFieldEditorUI();
+      return;
     }
   } else {
+    // <<< 2ème correction (section vide)
+    editingGroupIndex = -1;
+    editingFieldIndex = -1;
+    $('#groupEditor')?.classList.add('hidden');
+    $('#editorArea')?.classList.remove('hidden');
     clearFieldEditorUI();
+    return;
   }
-  highlightEditing(); scrollEditingIntoView();
+
+  highlightEditing(); 
+  scrollEditingIntoView();
 }
   
 function renderAll(){
