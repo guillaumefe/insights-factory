@@ -758,6 +758,77 @@ function wrapByChars(s, maxChars){
   if (cur) out.push(cur);
   return out.length ? out : [''];
 }
+
+// --- Deep clone robuste
+function deepClone(obj){
+  if (typeof structuredClone === 'function') return structuredClone(obj);
+  return JSON.parse(JSON.stringify(obj));
+}
+
+// --- Renomme proprement un champ selon vos règles
+function _renameFieldUnique(f){
+  const base = tinyName(f.label || f.name || 'champ');
+  f.name = uniqueName(base);
+  f.nameAuto = false;
+}
+
+// --- Renomme proprement un groupe (+ uid neuf) et ses champs
+function _renameGroupUnique(g){
+  g.__uid = genUid();
+  const base = tinyName(g.label || g.name || 'groupe');
+  g.name = uniqueName(base);
+  g.nameAuto = false;
+  (g.fields || []).forEach(_renameFieldUnique);
+}
+
+// --- Renomme tous les items d’une section copiée
+function _uniquifySectionItems(sec){
+  (sec.fields || []).forEach(it=>{
+    if (isGroup(it)) _renameGroupUnique(it);
+    else _renameFieldUnique(it);
+  });
+}
+
+// Dupliquer une section du process courant
+function duplicateSection(procIdx, secIdx){
+  const src = getSection(procIdx, secIdx);
+  if (!src) return;
+  const copy = deepClone(src);
+  copy.title = (src.title || '(sans titre)') + ' (copie)';
+
+  // Rendre les noms & uid uniques dans le contexte du process/section cibles
+  const prevP = currentProcess, prevS = currentSection;
+  currentProcess = procIdx; currentSection = secIdx;
+  _uniquifySectionItems(copy);
+  currentProcess = prevP; currentSection = prevS;
+
+  const destIdx = secIdx + 1;
+  PROCESSES[procIdx].sections.splice(destIdx, 0, copy);
+  save(); renderAll(); selectProcess(procIdx); selectSection(destIdx);
+  toast('Partie dupliquée ✅');
+}
+
+// Dupliquer un processus entier
+function duplicateProcess(procIdx){
+  const src = getProcess(procIdx);
+  if (!src) return;
+  const copy = deepClone(src);
+  copy.name = (src.name || 'Processus') + ' (copie)';
+  copy.enabled = src.enabled !== false;
+
+  // uid neufs pour les groupes (utile pour DnD)
+  (copy.sections || []).forEach(sec=>{
+    (sec.fields || []).forEach(it=>{
+      if (isGroup(it)) it.__uid = genUid();
+    });
+  });
+
+  const destIdx = procIdx + 1;
+  PROCESSES.splice(destIdx, 0, copy);
+  save(); renderAll(); selectProcess(destIdx);
+  toast('Processus dupliqué ✅');
+}
+
 </script>
 
 <!-- =========================
@@ -790,7 +861,8 @@ function renderProcesses(){
     const bToggle = el('button','btn', proc.enabled ? 'Désactiver' : 'Activer'); bToggle.dataset.act='toggle';
     const bEdit   = el('button','btn','Éditer'); bEdit.dataset.act='edit';
     const bDel    = el('button','btn danger','Supprimer'); bDel.dataset.act='del';
-    right.append(bToggle,bEdit,bDel);
+    const bDup   = el('button','btn','Dupliquer'); bDup.dataset.act='dup';
+    right.append(bDup, bToggle, bEdit, bDel);
 
     item.append(drag,title,pill,right);
     if (i===currentProcess) item.style.outline='2px solid var(--accent-2)';
@@ -798,6 +870,9 @@ function renderProcesses(){
     item.addEventListener('click',(e)=>{
       const act = e.target.closest('button')?.dataset?.act || 'edit';
       if (act==='edit'){ selectProcess(i); $('#processEditor')?.scrollIntoView({behavior:'smooth'}); }
+      else if (act==='dup'){ 
+        duplicateProcess(i);
+      }
       else if (act==='toggle'){ PROCESSES[i].enabled = !PROCESSES[i].enabled; save(); renderAll(); }
       else if (act==='del'){
         if (PROCESSES.length<=1){ toast('Au moins un processus est requis'); return; }
@@ -872,12 +947,16 @@ function renderSections(){
     const bDown=el('button','btn','⬇️'); bDown.dataset.act='down';
     const bEdit=el('button','btn','Éditer'); bEdit.dataset.act='edit';
     const bDel=el('button','btn danger','Supprimer'); bDel.dataset.act='del';
-    right.append(bUp,bDown,bEdit,bDel);
+    const bDup=el('button','btn','Dupliquer'); bDup.dataset.act='dup';
+    right.append(bDup, bUp, bDown, bEdit, bDel);
     item.append(drag,title,pill,right);
 
     item.addEventListener('click',(e)=>{
       const act=e.target.closest('button')?.dataset?.act || 'edit';
       if (act==='edit') selectSection(i);
+      else if (act==='dup'){             // ← AJOUT
+        duplicateSection(currentProcess, i);
+      }
       else if (act==='del'){ if(confirm('Supprimer cette partie ?')){ sections.splice(i,1); selectSection(-1); save(); renderAll(); } }
       else if (act==='up'){ if(i>0){ const [m]=sections.splice(i,1); sections.splice(i-1,0,m); save(); renderAll(); selectSection(i-1); } }
       else if (act==='down'){ if(i<sections.length-1){ const [m]=sections.splice(i,1); sections.splice(i+1,0,m); save(); renderAll(); selectSection(i+1); } }
