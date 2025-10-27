@@ -725,6 +725,161 @@ function uniqueName(base){
   return `${name}-${n}`;
 }
 
+// ===== Helpers — nommage à l’export (unique à l’échelle de la section) =====
+function makeNameFactoryForSection(section){
+  // 1) recense tous les noms déjà présents dans la section (champs racine, groupes, champs des groupes)
+  const used = new Set();
+  (section?.fields || []).forEach(it=>{
+    if (isGroup(it)) {
+      if (it.name) used.add(String(it.name).trim());
+      (it.fields || []).forEach(f => { if (f?.name) used.add(String(f.name).trim()); });
+    } else if (isField(it)) {
+      if (it.name) used.add(String(it.name).trim());
+    }
+  });
+
+  // 2) renvoie une fonction qui génère un nom unique à partir d'un label (fallback par type)
+  return function genName(label, kind='field'){
+    const base = tinyName(label || (kind==='group' ? 'groupe' : 'champ')) || 'i';
+    if (!used.has(base)) { used.add(base); return base; }
+    let n = 2;
+    while (used.has(`${base}-${n}`)) n++;
+    const out = `${base}-${n}`;
+    used.add(out);
+    return out;
+  };
+}
+
+// ===== Export-only: nettoyage + auto-noms + confirmations =====
+function cleanItemForExport(it, genName){
+  // --- Groupe ---
+  if (isGroup(it)){
+    const groupName = (it.name||'').trim() || genName(it.label, 'group');
+    const g = {
+      group: {
+        name: groupName,
+        ...(it.label ? { label: String(it.label).trim() } : {}),
+        ...(it.required ? { required: true } : {}),
+        ...(it.repeatable ? { repeatable: true } : {})
+      }
+    };
+
+    g.fields = (it.fields || [])
+      .filter(isField)
+      .map(f => {
+        const name = (f.name || '').trim() || genName(f.label, 'field');
+        const out = { name, type: f.type || 'text' };
+
+        if (f.label) out.label = String(f.label).trim();
+        if (f.repeatable) out.repeatable = true;
+        if (f.required) out.required = true;
+
+        if (isOptType(f.type)){
+          const opts = (f.options || []).map(x=>String(x).trim()).filter(Boolean);
+          if (opts.length === 0) return null; // radio/select sans options -> retiré
+          out.options = opts;
+        }
+
+        const icon = String(f.tips?.icon || '').trim();
+        const text = String(f.tips?.text || '').trim();
+        if (icon || text) out.tips = { ...(icon?{icon}:{}) , ...(text?{text}:{}) };
+
+        return out;
+      })
+      .filter(Boolean);
+
+    if (g.fields.length === 0) return null; // groupe vide -> retiré
+    return g;
+  }
+
+  // --- Champ simple ---
+  const name = (it.name || '').trim() || genName(it.label, 'field');
+  const out = { name, type: it.type || 'text' };
+
+  if (it.label) out.label = String(it.label).trim();
+  if (it.repeatable) out.repeatable = true;
+  if (it.required) out.required = true;
+
+  if (isOptType(it.type)){
+    const opts = (it.options || []).map(x=>String(x).trim()).filter(Boolean);
+    if (opts.length === 0) return null; // radio/select sans options -> retiré
+    out.options = opts;
+  }
+
+  const icon = String(it.tips?.icon || '').trim();
+  const text = String(it.tips?.text || '').trim();
+  if (icon || text) out.tips = { ...(icon?{icon}:{}) , ...(text?{text}:{}) };
+
+  return out;
+}
+
+/**
+ * Construit le modèle pour EXPORT uniquement :
+ * - détecte anomalies (groupe vide, champ sans nom, radio/select sans options)
+ * - demande confirmation
+ * - auto-répare à l’export (noms auto, retrait des items invalides)
+ * - alerte si erreur non gérée
+ *
+ * Retourne: Array de processus OU null (si l’utilisateur annule / erreur).
+ */
+function getCleanModelForExport(){
+  try{
+    const problems = [];
+
+    PROCESSES.forEach((p,pi)=>{
+      (p.sections||[]).forEach((sec,si)=>{
+        (sec.fields||[]).forEach((it,fi)=>{
+          if (isGroup(it)){
+            // groupe vide ?
+            if (!Array.isArray(it.fields) || it.fields.length===0) {
+              problems.push(`GROUPE VIDE (processus ${pi+1}, partie ${si+1}, item ${fi+1})`);
+            }
+            // champs du groupe
+            (it.fields||[]).forEach((f,gj)=>{
+              const noName = !(f?.name||'').trim();
+              const badOpt = isOptType(f?.type) && (!Array.isArray(f.options) || f.options.every(o=>String(o).trim()===''));
+              if (noName) problems.push(`CHAMP SANS NOM dans le GROUPE (p${pi+1}/s${si+1}/g${fi+1}/f${gj+1})`);
+              if (badOpt) problems.push(`RADIO/SELECT SANS OPTIONS dans le GROUPE (p${pi+1}/s${si+1}/g${fi+1}/f${gj+1})`);
+            });
+          } else if (isField(it)) {
+            const noName = !(it?.name||'').trim();
+            const badOpt = isOptType(it?.type) && (!Array.isArray(it.options) || it.options.every(o=>String(o).trim()===''));
+            if (noName) problems.push(`CHAMP SANS NOM (processus ${pi+1}, partie ${si+1}, item ${fi+1})`);
+            if (badOpt) problems.push(`RADIO/SELECT SANS OPTIONS (processus ${pi+1}, partie ${si+1}, item ${fi+1})`);
+          }
+        });
+      });
+    });
+
+    if (problems.length){
+      const ok = confirm(
+        "⚠️ Anomalies détectées :\n" +
+        problems.map(s=>"• "+s).join("\n") +
+        "\n\n➡️ Je peux corriger automatiquement à l’export (génération de noms manquants, retrait des radio/select sans options, retrait des groupes vides).\n" +
+        "Voulez-vous continuer ?"
+      );
+      if (!ok) return null; // utilisateur annule
+    }
+
+    // Construction du modèle exporté avec nommage unique par section
+    return PROCESSES
+      .filter(p=>p.enabled!==false)
+      .map(p=>({
+        name: (p.name||'').trim(),
+        sections: (p.sections||[]).map(sec=>{
+          const genName = makeNameFactoryForSection(sec);
+          return {
+            title: (sec.title||'').trim(),
+            fields: (sec.fields||[]).map(it=>cleanItemForExport(it, genName)).filter(Boolean)
+          };
+        })
+      }));
+  }catch(err){
+    alert("❌ ERREUR NON GÉRÉE : " + (err?.message || err) + "\nExport interrompu.");
+    return null;
+  }
+}
+
 /* Fabriques */
 function makeField(){ return { __kind:'field', name:'', type:'text', label:'', required:false, repeatable:false, options:[], nameAuto:true, tips:{icon:'',text:''} }; }
 function makeGroup(){ return { __kind:'group', __uid:genUid(), name:'', label:'', required:false, repeatable:false, fields:[], nameAuto:true }; }
@@ -1613,89 +1768,112 @@ function renderAll(){
 }
 
 /* --- Aperçu JSON --- */
-function cleanItem(it){
+function cleanItem(it, genName){
   // --- CAS GROUPE ---
   if (isGroup(it)){
+    const groupName = (it.name||'').trim() || genName(it.label, 'group');
     const g = {
       group: {
-        name: (it.name||'').trim(),
+        name: groupName,
         ...(it.label ? { label: String(it.label).trim() } : {}),
         ...(it.required ? { required: true } : {}),
         ...(it.repeatable ? { repeatable: true } : {})
       }
     };
 
-    // Nettoyage des champs du groupe
     g.fields = (it.fields || [])
       .filter(isField)
       .map(f => {
-        const out = {
-          name: (f.name || '').trim(),
-          type: f.type || 'text'
-        };
+        const name = (f.name || '').trim() || genName(f.label, 'field');
+        const out = { name, type: f.type || 'text' };
+
         if (f.label) out.label = String(f.label).trim();
         if (f.repeatable) out.repeatable = true;
         if (f.required) out.required = true;
 
-        // radio/select : garder uniquement si options non vides après nettoyage
-        if (isOptType(f.type)) {
-          const opts = (f.options || [])
-            .map(x => String(x).trim())
-            .filter(x => x !== '');
-          if (opts.length === 0) return null; // << ignore le champ invalide
+        if (isOptType(f.type)){
+          const opts = (f.options || []).map(x=>String(x).trim()).filter(Boolean);
+          if (opts.length === 0) return null;
           out.options = opts;
         }
 
-        // Tips
         const icon = String(f.tips?.icon || '').trim();
         const text = String(f.tips?.text || '').trim();
-        if (icon || text) out.tips = { ...(icon ? {icon} : {}), ...(text ? {text} : {}) };
+        if (icon || text) out.tips = { ...(icon?{icon}:{}) , ...(text?{text}:{}) };
 
         return out;
       })
-      .filter(Boolean); // supprime les champs null (invalides)
+      .filter(Boolean);
 
-    // Groupe vide => ignorer (important pour le validateur externe)
     if (g.fields.length === 0) return null;
-
     return g;
   }
 
   // --- CAS CHAMP SIMPLE ---
-  const out = {
-    name: (it.name || '').trim(),
-    type: it.type || 'text'
-  };
+  const name = (it.name||'').trim() || genName(it.label, 'field');
+  const out = { name, type: it.type || 'text' };
+
   if (it.label) out.label = String(it.label).trim();
   if (it.repeatable) out.repeatable = true;
   if (it.required) out.required = true;
 
-  if (isOptType(it.type)) {
-    const opts = (it.options || [])
-      .map(x => String(x).trim())
-      .filter(x => x !== '');
-    if (opts.length === 0) return null; // << ignore radio/select sans options
+  if (isOptType(it.type)){
+    const opts = (it.options||[]).map(x=>String(x).trim()).filter(Boolean);
+    if (opts.length === 0) return null;
     out.options = opts;
   }
 
   const icon = String(it.tips?.icon || '').trim();
   const text = String(it.tips?.text || '').trim();
-  if (icon || text) out.tips = { ...(icon ? {icon} : {}), ...(text ? {text} : {}) };
+  if (icon || text) out.tips = { ...(icon?{icon}:{}) , ...(text?{text}:{}) };
 
   return out;
 }
 
 function getCleanModel(){
-  return PROCESSES
-    .filter(p => p.enabled !== false)
-    .map(p => ({
-      name: (p.name || '').trim(),
-      sections: (p.sections || []).map(sec => ({
-        title: (sec.title || '').trim(),
-        // map -> cleanItem ; filter(Boolean) supprime groupes/champs invalides (ex: groupe vide)
-        fields: (sec.fields || []).map(cleanItem).filter(Boolean)
-      }))
-    }));
+  try {
+    const problematic = [];
+
+    PROCESSES.forEach((p,pi)=>{
+      (p.sections||[]).forEach((sec,si)=>{
+        (sec.fields||[]).forEach((it,fi)=>{
+          if (isGroup(it) && (!it.fields || !it.fields.length)) problematic.push(`GROUPE VIDE (p${pi}/s${si}/f${fi})`);
+          if (isField(it) && !(it.name||'').trim()) problematic.push(`CHAMP SANS NOM (p${pi}/s${si}/f${fi})`);
+          if (isField(it) && isOptType(it.type) && (!it.options || !it.options.length))
+            problematic.push(`RADIO/SELECT SANS OPTIONS (p${pi}/s${si}/f${fi})`);
+        });
+      });
+    });
+
+    if (problematic.length){
+      const ok = confirm(
+        "⚠ Des anomalies mineures ont été détectées :\n" +
+        problematic.map(e=>"• " + e).join("\n") +
+        "\n\n➡ Je peux les corriger automatiquement à l’export.\n" +
+        "Voulez-vous continuer ?"
+      );
+      if (!ok) return null;
+    }
+
+    return PROCESSES
+      .filter(p=>p.enabled!==false)
+      .map(p=>{
+        return {
+          name:(p.name||'').trim(),
+          sections:(p.sections||[]).map(sec=>{
+            const genName = makeNameFactoryForSection(sec);
+            return {
+              title:(sec.title||'').trim(),
+              fields:(sec.fields||[]).map(it=>cleanItem(it,genName)).filter(Boolean)
+            };
+          })
+        };
+      });
+
+  } catch(err){
+    alert("❌ ERREUR NON GÉRÉE : " + err.message + "\nExport interrompu.");
+    return null;
+  }
 }
 
 function renderPreview(){
@@ -2110,8 +2288,9 @@ async function svgTextToPngBlob(svgText, scale = 2){
 }
 
 async function exportProcessAsZip(){
-  // 1) Construire le JSON “processes[]” attendu par !nsights
-  const processes = getCleanModel();
+  // 1) Construire le JSON “processes[]” attendu par !nsights (mode EXPORT avec corrections/confirm)
+  const processes = getCleanModelForExport();   // << utilise la version export (confirm + auto-fix)
+  if (!processes) return;                       // annule si l’utilisateur refuse ou en cas d’erreur non gérée
   if (!Array.isArray(processes) || processes.length === 0){
     alert('Aucun processus activé à exporter.');
     return;
@@ -2151,7 +2330,7 @@ async function exportProcessAsZip(){
 
   const files = [
     { name: 'processus.json', data: strToU8(jsonPretty), date:new Date() },
-    { name: 'README.txt',   data: strToU8(readme),      date:new Date() }
+    { name: 'README.txt',     data: strToU8(readme),      date:new Date() }
   ];
 
   // 5) Créer le ZIP protégé par mot de passe (ZipCrypto)
@@ -2222,7 +2401,10 @@ function bindGlobal(){
   $('#btnExport').addEventListener('click', async ()=>{
     const pwd = await promptPassword('Exporter JSON (protégé)', "Entrez un mot de passe pour chiffrer l'export.");
     if (!pwd) return;
-    const clean=getCleanModel();
+  
+    const clean = getCleanModelForExport();  // <<<<<< ICI
+    if (!clean) return;                      // annule si refus/erreur
+  
     const payload=await aesGcmEncryptFromString(pwd, JSON.stringify(clean,null,2));
     const blob=new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='template.processes.enc.json';
@@ -2230,16 +2412,21 @@ function bindGlobal(){
     toast('JSON chiffré exporté ✅');
   });
 
+
   // Copie en clair
   $('#btnCopy').addEventListener('click', async ()=>{
     const ok = await confirmWarning('Copier le JSON en clair',"Vous allez copier le modèle en clair dans le presse-papiers. Évitez de le coller dans des outils non sûrs.",'Copier quand même');
     if (!ok) return;
+  
+    const clean = getCleanModelForExport();  // <<<<<< ICI
+    if (!clean) return;                      // annule si refus/erreur
+  
     try{
-      const clean=getCleanModel();
       await navigator.clipboard.writeText(JSON.stringify(clean,null,2));
       toast('JSON copié (en clair) ✅');
     }catch(e){ alert("Impossible de copier dans le presse-papiers."); }
   });
+
 
   // Import JSON (détecte chiffrage)
   $('#fileImport').addEventListener('change', async (e)=>{
