@@ -1264,7 +1264,9 @@ function renderFields(items){
           e.stopPropagation();
           if (isRecentDrop()) return;
 
-          const act = e.target.closest('button')?.dataset?.act || 'edit';
+          const btn = e.target.closest('button[data-act]');
+          if (!btn) return;                // ← ne rien faire si on n’a pas cliqué
+          const act = btn.dataset.act;
 
           const sec = S()[currentSection];
           if (!sec) return;
@@ -1415,7 +1417,9 @@ function renderFields(items){
       // CLIC d'édition champ RACINE
       item.addEventListener('click',(e)=>{
         if (isRecentDrop()) return;
-        const act = e.target.closest('button')?.dataset?.act || 'edit';
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;                // ← ne rien faire si on n’a pas cliqué
+        const act = btn.dataset.act;
         const arr = S()[currentSection].fields;
 
         if (act==='edit'){
