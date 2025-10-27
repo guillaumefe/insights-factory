@@ -1259,9 +1259,10 @@ function endDrop(){
   requestAnimationFrame(()=>{
     save();
     softRerender();
-    // recentre (doucement) sur l’élément en édition si défini
-    scrollEditingIntoView();
-    _dropBusy = false;
+    requestAnimationFrame(()=>{
+      scrollEditingIntoView();
+      _dropBusy = false;
+    });
   });
 }
   
@@ -1371,6 +1372,16 @@ function renderFields(items){
       if (isGroup(moved)) insertGroupAtRoot(currentProcess,currentSection,moved,beforeIdx);
       else insertFieldAtRoot(currentProcess,currentSection,moved,beforeIdx);
 
+      // ⬇️ Sélection auto à la nouvelle position (drop sur la zone racine)
+      const arr = S()[currentSection].fields || [];
+      if (isGroup(moved)) {
+        editingGroupIndex = (beforeIdx == null) ? (arr.length - 1) : beforeIdx;
+        editingFieldIndex = -1;
+      } else {
+        editingGroupIndex = -1;
+        editingFieldIndex = (beforeIdx == null) ? (arr.length - 1) : beforeIdx;
+      }
+
       e.dataTransfer.dropEffect='move';
       markDrop(); endDrop();
     });
@@ -1416,6 +1427,16 @@ function renderFields(items){
             payload.proc===currentProcess && payload.sec===currentSection && payload.gi < destIndex) destIndex -= 1;
         if (isGroup(moved)) insertGroupAtRoot(currentProcess,currentSection,moved,destIndex);
         else insertFieldAtRoot(currentProcess,currentSection,moved,destIndex);
+
+        // ⬇️ Sélection auto (drop avant un groupe / à la racine)
+        if (isGroup(moved)) {
+          editingGroupIndex = destIndex;
+          editingFieldIndex = -1;
+        } else {
+          editingGroupIndex = -1;
+          editingFieldIndex = destIndex;
+        }
+
         e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
       });
 
@@ -1429,6 +1450,12 @@ function renderFields(items){
         if (payload.kind !== 'field'){ endDrop(); return; }
         const moved = takeItemFrom(payload); if (!moved || !isField(moved)) { endDrop(); return; }
         insertFieldInGroupByUid(g.dataset.gid, moved, null);
+
+        // ⬇️ Sélection auto (append à la fin du groupe)
+        const gi = findGroupByUid(g.dataset.gid).index;
+        editingGroupIndex = gi;
+        editingFieldIndex = (S()[currentSection].fields[gi].fields.length - 1);
+
         e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
       });
 
@@ -1479,6 +1506,11 @@ function renderFields(items){
           if (payload.from==='group' && payload.gid===it.__uid && payload.fi < dest) dest -= 1;
           const moved = takeItemFrom(payload); if (!moved || !isField(moved)){ endDrop(); return; }
           insertFieldInGroupByUid(it.__uid, moved, dest);
+
+          // ⬇️ Sélection auto (drop avant un champ dans le groupe)
+          editingGroupIndex = idx;
+          editingFieldIndex = dest;
+
           e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
         });
 
@@ -1488,7 +1520,7 @@ function renderFields(items){
           if (isRecentDrop()) return;
 
           const btn = e.target.closest('button[data-act]');
-          if (!btn) return;                // ← ne rien faire si on n’a pas cliqué
+          if (!btn) return;
           const act = btn.dataset.act;
 
           const sec = S()[currentSection];
@@ -1537,8 +1569,8 @@ function renderFields(items){
       // CLICS sur l'en-tête du groupe uniquement
       g.addEventListener('click', (e) => {
         if (isRecentDrop()) return;
-        if (e.target.closest('.group-fields')) return; // ignorer clics dans les items
-        if (!e.target.closest('.group-head')) return;  // ne réagir qu'à l'en-tête
+        if (e.target.closest('.group-fields')) return;
+        if (!e.target.closest('.group-head')) return;
 
         const act = e.target.closest('button')?.dataset?.act;
         if (!act) return;
@@ -1637,6 +1669,15 @@ function renderFields(items){
         if (isGroup(moved)) insertGroupAtRoot(currentProcess,currentSection,moved,dest);
         else insertFieldAtRoot(currentProcess,currentSection,moved,dest);
 
+        // ⬇️ Sélection auto (drop avant un champ racine)
+        if (isGroup(moved)) {
+          editingGroupIndex = dest;
+          editingFieldIndex = -1;
+        } else {
+          editingGroupIndex = -1;
+          editingFieldIndex = dest;
+        }
+
         e.dataTransfer.dropEffect='move'; markDrop(); endDrop();
       });
 
@@ -1644,7 +1685,7 @@ function renderFields(items){
       item.addEventListener('click',(e)=>{
         if (isRecentDrop()) return;
         const btn = e.target.closest('button[data-act]');
-        if (!btn) return;                // ← ne rien faire si on n’a pas cliqué
+        if (!btn) return;
         const act = btn.dataset.act;
         const arr = S()[currentSection].fields;
 
