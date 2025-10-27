@@ -852,6 +852,7 @@ function updateTipsPreview(f){
 
 /* --- Rendu Processus / Sections (DOM sûr) --- */
 function renderProcesses(){
+  preservePanelScroll(() => {
   const list = $('#processList'); list.innerHTML = '';
   PROCESSES.forEach((proc, i)=>{
     const item = el('div', 'proc-item' + (proc.enabled ? '' : ' disabled'));
@@ -935,9 +936,11 @@ function renderProcesses(){
 
     list.appendChild(item);
   });
+  });
 }
 
 function renderSections(){
+  preservePanelScroll(() => {
   const list = $('#sectionList'); list.innerHTML = '';
   const sections = S();
   sections.forEach((sec,i)=>{
@@ -985,6 +988,7 @@ function renderSections(){
     });
 
     list.appendChild(item);
+  });
   });
 }
 
@@ -1081,7 +1085,36 @@ function endDrop(){ requestAnimationFrame(()=>{ save(); renderAll(); selectSecti
 function markDrop(){ _justDroppedAt = performance.now(); }
 function isRecentDrop(){ return performance.now() - _justDroppedAt < 150; }
 
+// Mémorise/restaure scroll + focus/caret dans le panneau droit
+function preservePanelScroll(run){
+  const panel = document.querySelector('.main-panel');
+  const st = panel ? panel.scrollTop  : 0;
+  const sl = panel ? panel.scrollLeft : 0;
+
+  // focus/caret courant (utile quand on tape dans un input/textarea)
+  const ae = document.activeElement;
+  const hasSel = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+  const ss = hasSel ? ae.selectionStart : null;
+  const se = hasSel ? ae.selectionEnd   : null;
+
+  run(); // <-- on effectue le rendu qui casse le scroll
+
+  // on restaure
+  if (panel){
+    panel.scrollTop  = st;
+    panel.scrollLeft = sl;
+  }
+  if (ae && document.contains(ae)) {
+    // on refocus et on remet le caret au même endroit si possible
+    try {
+      ae.focus();
+      if (hasSel && ss != null && se != null) ae.setSelectionRange(ss, se);
+    } catch (_) {}
+  }
+}
+
 function renderFields(items){
+  preservePanelScroll(() => {
   const box = $('#fieldList'); box.innerHTML = '';
 
   if (!box._dndBound){
@@ -1411,6 +1444,7 @@ function renderFields(items){
       box.appendChild(item);
     }
   });
+  });
   highlightEditing();
 }
 
@@ -1527,7 +1561,13 @@ function syncEditorToState(){
   highlightEditing(); scrollEditingIntoView();
 }
   
-function renderAll(){ renderProcesses(); renderSections(); renderPreview(); }
+function renderAll(){
+  preservePanelScroll(() => {
+    renderProcesses();
+    renderSections();
+    renderPreview();
+  });
+}
 
 /* --- Aperçu JSON --- */
 function cleanItem(it){
