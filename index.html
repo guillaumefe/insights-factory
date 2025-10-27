@@ -1171,6 +1171,16 @@ function selectProcess(i){
   if (S().length) { selectSection(0); } else { renderPreview(); }
 }
 
+function softRerender(){
+  preservePanelScroll(() => {
+    renderProcesses();
+    renderSections();
+    renderFields(S()[currentSection]?.fields || []);
+    renderPreview();
+  });
+  highlightEditing();
+}
+
 function selectSection(i){
   currentSection=i; editingFieldIndex=-1; editingGroupIndex=-1;
   const title=$('#editorTitle'); const area=$('#editorArea'); const pe=$('#processEditor');
@@ -1248,10 +1258,7 @@ function beginDrop(e){ if (_dropBusy) return false; _dropBusy=true; e?.preventDe
 function endDrop(){
   requestAnimationFrame(()=>{
     save();
-    preservePanelScroll(() => {
-      renderAll();
-      selectSection(currentSection);
-    });
+    softRerender();
     // recentre (doucement) sur l’élément en édition si défini
     scrollEditingIntoView();
     _dropBusy = false;
@@ -1303,10 +1310,7 @@ function duplicateFieldAtRoot(rootIndex){
   editingFieldIndex = rootIndex + 1;
 
   save();
-  preservePanelScroll(() => {
-    renderAll();
-    selectSection(currentSection);
-  });
+  softRerender();
   scrollEditingIntoView();
   toast('Champ dupliqué ✅');
 }
@@ -1326,10 +1330,7 @@ function duplicateFieldInGroup(groupIndex, fieldIndex){
   editingFieldIndex = fieldIndex + 1;
 
   save();
-  preservePanelScroll(() => {
-    renderAll();
-    selectSection(currentSection);
-  });
+  softRerender();
   scrollEditingIntoView();
   toast('Champ dupliqué ✅');
 }
