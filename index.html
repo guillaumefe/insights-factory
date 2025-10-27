@@ -1276,6 +1276,41 @@ function preservePanelScroll(run){
   }
 }
 
+// --- Duplication d'un champ racine de la section courante
+function duplicateFieldAtRoot(rootIndex){
+  const sec = S()[currentSection]; if (!sec) return;
+  const arr = sec.fields || (sec.fields = []);
+  const src = arr[rootIndex]; if (!isField(src)) return;
+
+  const copy = deepClone(src);
+  _renameFieldUnique(copy);                 // assure un name unique
+  arr.splice(rootIndex + 1, 0, copy);
+
+  editingGroupIndex = -1;
+  editingFieldIndex = rootIndex + 1;
+
+  save(); renderAll(); selectSection(currentSection);
+  toast('Champ dupliqué ✅');
+}
+
+// — Duplique un champ à l’intérieur d’un groupe
+function duplicateFieldInGroup(groupIndex, fieldIndex){
+  const sec = S()[currentSection]; if (!sec) return;
+  const grp = sec.fields?.[groupIndex]; if (!grp || !isGroup(grp)) return;
+  const arr = grp.fields || (grp.fields = []);
+  const src = arr[fieldIndex]; if (!isField(src)) return;
+
+  const copy = deepClone(src);
+  _renameFieldUnique(copy);                 // assure un name unique
+  arr.splice(fieldIndex + 1, 0, copy);
+
+  editingGroupIndex = groupIndex;
+  editingFieldIndex = fieldIndex + 1;
+
+  save(); renderAll(); selectSection(currentSection);
+  toast('Champ dupliqué ✅');
+}
+
 function renderFields(items){
   preservePanelScroll(() => {
   const box = $('#fieldList'); box.innerHTML = '';
@@ -1396,8 +1431,9 @@ function renderFields(items){
         const bUp=el('button','btn','⬆️'); bUp.dataset.act='up';
         const bDown=el('button','btn','⬇️'); bDown.dataset.act='down';
         const bEdit=el('button','btn','Éditer'); bEdit.dataset.act='edit';
+        const bDup=el('button','btn','Dupliquer'); bDup.dataset.act='dup';
         const bDel=el('button','btn danger','Supprimer'); bDel.dataset.act='del';
-        right.append(bUp,bDown,bEdit,bDel);
+        right.append(bUp,bDown,bEdit,bDup,bDel);
 
         item.append(drag, cb, meta, right);
 
@@ -1464,6 +1500,8 @@ function renderFields(items){
               editingFieldIndex = j + 1;
               save(); renderAll(); selectSection(currentSection);
             }
+          } else if (act === 'dup') {
+            duplicateFieldInGroup(idx, j);
           }
         });
 
@@ -1532,8 +1570,9 @@ function renderFields(items){
       const bUp=el('button','btn','⬆️'); bUp.dataset.act='up';
       const bDown=el('button','btn','⬇️'); bDown.dataset.act='down';
       const bEdit=el('button','btn','Éditer'); bEdit.dataset.act='edit';
+      const bDup=el('button','btn','Dupliquer'); bDup.dataset.act='dup';
       const bDel=el('button','btn danger','Supprimer'); bDel.dataset.act='del';
-      right.append(bUp,bDown,bEdit,bDel);
+      right.append(bUp,bDown,bEdit,bDup,bDel);
 
       item.append(drag, cb, meta, right);
 
@@ -1605,6 +1644,9 @@ function renderFields(items){
         } else if (act==='down'){
           const i = +item.dataset.index;
           if (i<arr.length-1){ const [m]=arr.splice(i,1); arr.splice(i+1,0,m); save(); renderAll(); selectSection(currentSection); }
+        } else if (act==='dup'){
+          const i = +item.dataset.index;
+          duplicateFieldAtRoot(i);
         }
       });
 
